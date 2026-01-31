@@ -91,10 +91,18 @@ export class WordProjectile {
     if (this.launched) return;
     this.launched = true;
 
+    // Switch all letters to dynamic first
     for (const letter of this.letters) {
       letter.rect.setStatic(false);
-      letter.rect.setVelocity(PHYSICS.launchVelocity.x, PHYSICS.launchVelocity.y);
     }
+
+    // Apply velocity on the next physics step, after Matter has
+    // processed the static→dynamic transition and recalculated mass
+    this.scene.matter.world.once('beforeupdate', () => {
+      for (const letter of this.letters) {
+        letter.rect.setVelocity(PHYSICS.launchVelocity.x, PHYSICS.launchVelocity.y);
+      }
+    });
   }
 
   shatter(): void {
