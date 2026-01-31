@@ -6,6 +6,7 @@ import {
   GAME_WIDTH,
   GAME_HEIGHT,
   LAYOUT,
+  PHYSICS,
 } from '../config';
 import { GamePhase } from '../types';
 import { Ground } from '../objects/Ground';
@@ -34,10 +35,12 @@ export class GameScene extends Phaser.Scene {
   private streakLabel!: Phaser.GameObjects.Text;
   private streakCountText!: Phaser.GameObjects.Text;
   private hearAgainBtn!: Phaser.GameObjects.Container;
+  private restartBtn!: Phaser.GameObjects.Container;
   private currentWord = '';
   private impactHandled = false;
   private wrongAttempts = 0;
   private usedBackspace = false;
+  private missTimer: Phaser.Time.TimerEvent | null = null;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -50,6 +53,7 @@ export class GameScene extends Phaser.Scene {
     this.impactHandled = false;
     this.wrongAttempts = 0;
     this.usedBackspace = false;
+    this.missTimer = null;
 
     // Managers
     this.gameState = new GameStateManager();
@@ -138,6 +142,9 @@ export class GameScene extends Phaser.Scene {
     // Hear Again button
     this.hearAgainBtn = this.createHearAgainButton();
 
+    // Restart button (top-right corner)
+    this.restartBtn = this.createRestartButton();
+
     // Collision detection
     this.matter.world.on(
       'collisionstart',
@@ -186,13 +193,45 @@ export class GameScene extends Phaser.Scene {
     return container;
   }
 
+  private createRestartButton(): Phaser.GameObjects.Container {
+    const btnX = GAME_WIDTH - 60;
+    const btnY = 70;
+    const width = 100;
+    const height = 36;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(COLORS.support, 0.2);
+    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
+    bg.lineStyle(1, COLORS.support, 0.4);
+    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
+
+    const label = this.add
+      .text(0, 0, 'Restart', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '16px',
+        color: COLOR_STRINGS.support,
+      })
+      .setOrigin(0.5);
+
+    const container = this.add
+      .container(btnX, btnY, [bg, label])
+      .setDepth(10)
+      .setSize(width, height)
+      .setInteractive({ useHandCursor: true });
+
+    container.on('pointerdown', () => {
+      this.cleanupAll();
+      this.scene.restart();
+    });
+
+    return container;
+  }
+
   private handleHearAgain(): void {
     if (this.gameState.phase !== GamePhase.WaitingForInput) return;
 
-    // Re-speak the word
     this.audioManager.speakWord(this.currentWord);
 
-    // Briefly re-flash the word
     this.wordDisplayText.setText(this.currentWord);
     this.wordDisplayText.setVisible(true);
     this.wordDisplayBg.setVisible(true);
@@ -202,7 +241,6 @@ export class GameScene extends Phaser.Scene {
       if (this.gameState.phase === GamePhase.WaitingForInput) {
         this.wordDisplayText.setVisible(false);
         this.wordDisplayBg.setVisible(false);
-        // Restore hint if applicable
         if (this.wrongAttempts > 0) {
           this.hintText.setVisible(true);
         }
@@ -262,7 +300,6 @@ export class GameScene extends Phaser.Scene {
     if (this.gameState.phase !== GamePhase.WaitingForInput) return;
 
     if (typedText.toLowerCase() === this.currentWord.toLowerCase()) {
-      // Correct — track streak
       if (!this.usedBackspace && this.wrongAttempts === 0) {
         this.gameState.incrementStreak();
       } else {
@@ -277,12 +314,10 @@ export class GameScene extends Phaser.Scene {
       this.hearAgainBtn.setVisible(false);
       this.launchWord(typedText);
     } else {
-      // Wrong
       this.wrongAttempts++;
       this.feedbackText.setText('Try again!');
       this.inputManager.clear();
 
-      // Show first-letter hint after first wrong attempt
       if (this.wrongAttempts >= 1) {
         this.hintText.setText(this.currentWord[0]);
         this.hintText.setVisible(true);
@@ -300,7 +335,6 @@ export class GameScene extends Phaser.Scene {
   private updateStreakDisplay(): void {
     this.streakCountText.setText(String(this.gameState.streak));
 
-    // Glow effect at streak >= 3
     if (this.gameState.streak >= 3) {
       this.streakCountText.setColor('#FFD700');
       this.tweens.add({
@@ -329,8 +363,30 @@ export class GameScene extends Phaser.Scene {
       if (this.activeProjectile) {
         this.activeProjectile.launch();
         this.gameState.phase = GamePhase.WatchingImpact;
+
+        // Miss timeout — if no collision detected, advance anyway
+        this.missTimer = this.time.delayedCall(
+          PHYSICS.missTimeoutMs,
+          () => {
+            if (
+              this.gameState.phase === GamePhase.WatchingImpact &&
+              !this.impactHandled
+            ) {
+              this.handleMiss();
+            }
+          }
+        );
       }
     });
+  }
+
+  private handleMiss(): void {
+    // Word missed the building — clean up and move on
+    if (this.activeProjectile) {
+      this.oldProjectiles.push(this.activeProjectile);
+      this.activeProjectile = null;
+    }
+    this.presentNextWord();
   }
 
   private onCollision(event: {
@@ -348,6 +404,11 @@ export class GameScene extends Phaser.Scene {
 
       if ((isLetterA && isBlockB) || (isLetterB && isBlockA)) {
         this.impactHandled = true;
+        // Cancel miss timer since we hit the building
+        if (this.missTimer) {
+          this.missTimer.destroy();
+          this.missTimer = null;
+        }
         this.handleImpact();
         return;
       }
@@ -403,14 +464,6 @@ export class GameScene extends Phaser.Scene {
   private transitionToNextBuilding(): void {
     this.gameState.phase = GamePhase.TransitionToNext;
 
-    // Slide everything left, then set up new building
-    const allVisuals = [
-      this.buildingLabel,
-      this.streakLabel,
-      this.streakCountText,
-    ];
-
-    // Quick camera fade
     this.cameras.main.fade(400, 234, 244, 255);
 
     this.time.delayedCall(400, () => {
@@ -466,6 +519,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private cleanupProjectiles(): void {
+    if (this.missTimer) {
+      this.missTimer.destroy();
+      this.missTimer = null;
+    }
     if (this.activeProjectile) {
       this.activeProjectile.destroy();
       this.activeProjectile = null;

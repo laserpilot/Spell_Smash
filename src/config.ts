@@ -22,25 +22,26 @@ export const COLOR_STRINGS = {
 export const FONT_FAMILY = 'Fredoka';
 
 export const PHYSICS = {
-  gravity: { x: 0, y: 1 },
+  gravity: { x: 0, y: 0.5 },
   wordDensity: 0.008,
   blockDensity: 0.01,
-  blockFriction: 0.6,
-  restitution: 0.3,
-  launchVelocity: { x: 15, y: -2 },
+  blockFriction: 0.8,
+  restitution: 0.2,
+  launchVelocity: { x: 12, y: -14 },
   constraintStiffness: 0.9,
+  missTimeoutMs: 3000,
 } as const;
 
 export const LAYOUT = {
   groundY: 660,
-  buildingX: 900,
+  buildingX: 880,
   wordDisplayX: 300,
   wordDisplayY: 280,
-  launchOriginX: 200,
-  launchOriginY: 500,
+  launchOriginX: 180,
+  launchOriginY: 550,
   inputX: 60,
   inputY: 620,
-  buildingHeightThreshold: 40,
+  buildingHeightThreshold: 50,
 } as const;
 
 export const LETTER = {
@@ -51,6 +52,6 @@ export const LETTER = {
 } as const;
 
 export const BLOCK = {
-  width: 70,
-  height: 35,
+  width: 80,
+  height: 40,
 } as const;
