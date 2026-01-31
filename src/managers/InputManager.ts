@@ -12,6 +12,8 @@ export class InputManager {
 
   public onSubmit: ((text: string) => void) | null = null;
   public onBackspace: (() => void) | null = null;
+  public onKeyTyped: ((key: string, index: number) => void) | null = null;
+  public onKeyDeleted: ((index: number) => void) | null = null;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -67,12 +69,18 @@ export class InputManager {
         this.onSubmit(this.currentText);
       }
     } else if (event.key === 'Backspace') {
-      this.currentText = this.currentText.slice(0, -1);
-      this.updateDisplay();
-      if (this.onBackspace) this.onBackspace();
+      if (this.currentText.length > 0) {
+        const removedIndex = this.currentText.length - 1;
+        this.currentText = this.currentText.slice(0, -1);
+        this.updateDisplay();
+        if (this.onBackspace) this.onBackspace();
+        if (this.onKeyDeleted) this.onKeyDeleted(removedIndex);
+      }
     } else if (event.key.length === 1 && /^[a-zA-Z]$/.test(event.key)) {
-      this.currentText += event.key.toLowerCase();
+      const key = event.key.toLowerCase();
+      this.currentText += key;
       this.updateDisplay();
+      if (this.onKeyTyped) this.onKeyTyped(key, this.currentText.length - 1);
     }
   }
 

@@ -36,6 +36,7 @@ export class GameScene extends Phaser.Scene {
   private streakCountText!: Phaser.GameObjects.Text;
   private hearAgainBtn!: Phaser.GameObjects.Container;
   private restartBtn!: Phaser.GameObjects.Container;
+  private launchPadGfx!: Phaser.GameObjects.Graphics;
   private currentWord = '';
   private impactHandled = false;
   private wrongAttempts = 0;
@@ -63,10 +64,20 @@ export class GameScene extends Phaser.Scene {
     this.inputManager.onBackspace = () => {
       this.usedBackspace = true;
     };
+    this.inputManager.onKeyTyped = (key: string, index: number) => {
+      this.handleKeyTyped(key, index);
+    };
+    this.inputManager.onKeyDeleted = (_index: number) => {
+      this.handleKeyDeleted();
+    };
     this.audioManager = new AudioManager();
 
     // Ground
     this.ground = new Ground(this);
+
+    // Launch pad visual
+    this.launchPadGfx = this.add.graphics().setDepth(3);
+    this.drawLaunchPad();
 
     // Word display background
     this.wordDisplayBg = this.add.graphics().setDepth(8);
@@ -157,6 +168,20 @@ export class GameScene extends Phaser.Scene {
 
     // Start first building
     this.startNewBuilding();
+  }
+
+  private drawLaunchPad(): void {
+    this.launchPadGfx.clear();
+    const padW = LAYOUT.launchPadWidth;
+    const padH = LAYOUT.launchPadHeight;
+    const padX = LAYOUT.launchOriginX - padW / 2;
+    const padY = LAYOUT.launchOriginY - padH / 2 + 10; // slightly below letter center
+
+    // Shallow bowl / platform shape
+    this.launchPadGfx.fillStyle(COLORS.neutral, 0.1);
+    this.launchPadGfx.fillRoundedRect(padX, padY, padW, padH, 12);
+    this.launchPadGfx.lineStyle(2, COLORS.neutral, 0.25);
+    this.launchPadGfx.strokeRoundedRect(padX, padY, padW, padH, 12);
   }
 
   private createHearAgainButton(): Phaser.GameObjects.Container {
@@ -277,6 +302,17 @@ export class GameScene extends Phaser.Scene {
     this.wrongAttempts = 0;
     this.usedBackspace = false;
 
+    // Create empty projectile on the launch pad (letters added per-keystroke)
+    if (this.activeProjectile) {
+      this.activeProjectile.destroy();
+    }
+    this.activeProjectile = new WordProjectile(
+      this,
+      LAYOUT.launchOriginX,
+      LAYOUT.launchOriginY
+    );
+    this.launchPadGfx.setVisible(true);
+
     // Show word and speak it
     this.wordDisplayText.setText(this.currentWord);
     this.wordDisplayText.setVisible(true);
@@ -296,6 +332,20 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  private handleKeyTyped(key: string, index: number): void {
+    if (this.gameState.phase !== GamePhase.WaitingForInput) return;
+    if (!this.activeProjectile) return;
+
+    this.activeProjectile.addLetter(key, index);
+  }
+
+  private handleKeyDeleted(): void {
+    if (this.gameState.phase !== GamePhase.WaitingForInput) return;
+    if (!this.activeProjectile) return;
+
+    this.activeProjectile.removeLetter();
+  }
+
   private handleSubmit(typedText: string): void {
     if (this.gameState.phase !== GamePhase.WaitingForInput) return;
 
@@ -312,11 +362,42 @@ export class GameScene extends Phaser.Scene {
       this.feedbackText.setText('');
       this.hintText.setVisible(false);
       this.hearAgainBtn.setVisible(false);
-      this.launchWord(typedText);
+      this.launchPadGfx.setVisible(false);
+
+      // Launch the projectile directly — letters are already on the pad
+      this.gameState.phase = GamePhase.Launching;
+      if (this.activeProjectile) {
+        this.activeProjectile.launch();
+        this.gameState.phase = GamePhase.WatchingImpact;
+
+        // Miss timeout — if no collision detected, advance anyway
+        this.missTimer = this.time.delayedCall(
+          PHYSICS.missTimeoutMs,
+          () => {
+            if (
+              this.gameState.phase === GamePhase.WatchingImpact &&
+              !this.impactHandled
+            ) {
+              this.handleMiss();
+            }
+          }
+        );
+      }
     } else {
       this.wrongAttempts++;
       this.feedbackText.setText('Try again!');
       this.inputManager.clear();
+
+      // Clear letters from the pad (they tumble off)
+      if (this.activeProjectile) {
+        this.activeProjectile.clear();
+        // Create a fresh projectile for the retry
+        this.activeProjectile = new WordProjectile(
+          this,
+          LAYOUT.launchOriginX,
+          LAYOUT.launchOriginY
+        );
+      }
 
       if (this.wrongAttempts >= 1) {
         this.hintText.setText(this.currentWord[0]);
@@ -347,37 +428,6 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.streakCountText.setColor(COLOR_STRINGS.secondary);
     }
-  }
-
-  private launchWord(word: string): void {
-    this.gameState.phase = GamePhase.Launching;
-
-    this.activeProjectile = new WordProjectile(
-      this,
-      word,
-      LAYOUT.launchOriginX,
-      LAYOUT.launchOriginY
-    );
-
-    this.time.delayedCall(400, () => {
-      if (this.activeProjectile) {
-        this.activeProjectile.launch();
-        this.gameState.phase = GamePhase.WatchingImpact;
-
-        // Miss timeout — if no collision detected, advance anyway
-        this.missTimer = this.time.delayedCall(
-          PHYSICS.missTimeoutMs,
-          () => {
-            if (
-              this.gameState.phase === GamePhase.WatchingImpact &&
-              !this.impactHandled
-            ) {
-              this.handleMiss();
-            }
-          }
-        );
-      }
-    });
   }
 
   private handleMiss(): void {

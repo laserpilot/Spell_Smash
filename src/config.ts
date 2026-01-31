@@ -39,6 +39,8 @@ export const LAYOUT = {
   wordDisplayY: 280,
   launchOriginX: 180,
   launchOriginY: 550,
+  launchPadWidth: 320,
+  launchPadHeight: 60,
   inputX: 60,
   inputY: 620,
   buildingHeightThreshold: 50,
