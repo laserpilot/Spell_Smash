@@ -11,6 +11,7 @@ export class InputManager {
   private enabled = false;
 
   public onSubmit: ((text: string) => void) | null = null;
+  public onBackspace: (() => void) | null = null;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -68,6 +69,7 @@ export class InputManager {
     } else if (event.key === 'Backspace') {
       this.currentText = this.currentText.slice(0, -1);
       this.updateDisplay();
+      if (this.onBackspace) this.onBackspace();
     } else if (event.key.length === 1 && /^[a-zA-Z]$/.test(event.key)) {
       this.currentText += event.key.toLowerCase();
       this.updateDisplay();
