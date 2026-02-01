@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { FONT_FAMILY, COLOR_STRINGS, COLORS, LAYOUT } from '../config';
+import { DPR, FONT_FAMILY, COLOR_STRINGS, COLORS, LAYOUT } from '../config';
 import { runtimeConfig } from '../RuntimeConfig';
 
 export class InputManager {
@@ -47,6 +47,7 @@ export class InputManager {
         fontFamily: FONT_FAMILY,
         fontSize: '36px',
         color: COLOR_STRINGS.primary,
+        resolution: DPR,
       })
       .setOrigin(0, 0.5)
       .setDepth(10)

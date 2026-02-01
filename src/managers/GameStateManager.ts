@@ -14,11 +14,11 @@ const BUILDING_LEVELS: BuildingLevel[] = [
   { totalBlocks: 10, columns: 3, patternPool: ['stack'] },
   { totalBlocks: 15, columns: 3, patternPool: ['stack'] },
   { totalBlocks: 20, columns: 4, patternPool: ['stack', 'pyramid'] },
-  { totalBlocks: 28, columns: 4, patternPool: ['pyramid', 'tower'] },
-  { totalBlocks: 35, columns: 5, patternPool: ['pyramid', 'tower'] },
-  { totalBlocks: 42, columns: 5, patternPool: ['tower', 'offset'] },
-  { totalBlocks: 50, columns: 6, patternPool: ['offset', 'pyramid'] },
-  { totalBlocks: 60, columns: 6, patternPool: ['stack', 'pyramid', 'tower', 'offset'] },
+  { totalBlocks: 28, columns: 4, patternPool: ['pyramid', 'tower', 'bridge'] },
+  { totalBlocks: 35, columns: 5, patternPool: ['pyramid', 'tower', 'bridge'] },
+  { totalBlocks: 42, columns: 5, patternPool: ['tower', 'offset', 'castle'] },
+  { totalBlocks: 50, columns: 6, patternPool: ['offset', 'pyramid', 'castle'] },
+  { totalBlocks: 60, columns: 6, patternPool: ['stack', 'pyramid', 'tower', 'offset', 'bridge', 'castle'] },
 ];
 
 export class GameStateManager {
@@ -48,6 +48,7 @@ export class GameStateManager {
       x: LAYOUT.buildingX,
       groundY: LAYOUT.groundY,
       pattern,
+      pedestalHeight: LAYOUT.pedestalHeight,
     };
   }
 

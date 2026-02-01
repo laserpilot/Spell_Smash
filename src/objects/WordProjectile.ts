@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import {
+  DPR,
   FONT_FAMILY,
   COLOR_STRINGS,
   PHYSICS,
@@ -87,6 +88,7 @@ export class WordProjectile {
         fontSize: `${LETTER.fontSize}px`,
         color: COLOR_STRINGS.white,
         align: 'center',
+        resolution: DPR,
       })
       .setOrigin(0.5)
       .setDepth(5);

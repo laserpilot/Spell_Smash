@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import {
+  DPR,
   FONT_FAMILY,
   COLOR_STRINGS,
   COLORS,
@@ -18,6 +19,7 @@ import { InputManager } from '../managers/InputManager';
 import { GameStateManager } from '../managers/GameStateManager';
 import { AudioManager } from '../managers/AudioManager';
 import { DebugPanel } from '../debug/DebugPanel';
+import { SfxManager } from '../managers/SfxManager';
 
 export class GameScene extends Phaser.Scene {
   private ground!: Ground;
@@ -57,6 +59,7 @@ export class GameScene extends Phaser.Scene {
   private missTimer: Phaser.Time.TimerEvent | null = null;
   private sweepGfx!: Phaser.GameObjects.Graphics;
   private sweepAngle = 20;
+  private sfx!: SfxManager;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -88,6 +91,7 @@ export class GameScene extends Phaser.Scene {
       this.handleKeyDeleted();
     };
     this.audioManager = new AudioManager();
+    this.sfx = new SfxManager();
 
     // Background clouds
     this.clouds = [];
@@ -135,6 +139,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '56px',
         color: COLOR_STRINGS.primary,
+        resolution: DPR,
       })
       .setOrigin(0.5)
       .setDepth(10);
@@ -145,6 +150,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '24px',
         color: COLOR_STRINGS.support,
+        resolution: DPR,
       })
       .setOrigin(0.5)
       .setDepth(10);
@@ -155,6 +161,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '56px',
         color: COLOR_STRINGS.neutral,
+        resolution: DPR,
       })
       .setOrigin(0.5)
       .setAlpha(0.3)
@@ -166,6 +173,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '22px',
         color: COLOR_STRINGS.neutral,
+        resolution: DPR,
       })
       .setOrigin(0.5)
       .setDepth(10);
@@ -176,6 +184,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '16px',
         color: COLOR_STRINGS.neutral,
+        resolution: DPR,
       })
       .setOrigin(0, 0.5)
       .setDepth(10);
@@ -185,6 +194,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '32px',
         color: COLOR_STRINGS.secondary,
+        resolution: DPR,
       })
       .setOrigin(0, 0.5)
       .setDepth(10);
@@ -249,6 +259,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '18px',
         color: COLOR_STRINGS.support,
+        resolution: DPR,
       })
       .setOrigin(0, 0.5)
       .setDepth(10);
@@ -290,14 +301,14 @@ export class GameScene extends Phaser.Scene {
     const oy = LAYOUT.launchOriginY;
     const lineLen = 120;
 
-    // Faded arc showing full sweep range (10°–30°)
+    // Faded arc showing full sweep range (5°–25°)
     this.sweepGfx.lineStyle(2, COLORS.neutral, 0.2);
     this.sweepGfx.beginPath();
-    for (let deg = 10; deg <= 30; deg += 1) {
+    for (let deg = 5; deg <= 25; deg += 1) {
       const r = deg * (Math.PI / 180);
       const ax = ox + Math.cos(r) * lineLen;
       const ay = oy - Math.sin(r) * lineLen;
-      if (deg === 10) {
+      if (deg === 5) {
         this.sweepGfx.moveTo(ax, ay);
       } else {
         this.sweepGfx.lineTo(ax, ay);
@@ -357,6 +368,8 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    this.sfx.thresholdCross();
+
     // Brief white camera flash (30% opacity)
     this.cameras.main.flash(200, 255, 255, 200);
 
@@ -410,6 +423,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '20px',
         color: COLOR_STRINGS.neutral,
+        resolution: DPR,
       })
       .setOrigin(0.5);
 
@@ -444,6 +458,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '16px',
         color: COLOR_STRINGS.support,
+        resolution: DPR,
       })
       .setOrigin(0.5);
 
@@ -551,6 +566,7 @@ export class GameScene extends Phaser.Scene {
     if (this.gameState.phase !== GamePhase.WaitingForInput) return;
     if (!this.activeProjectile) return;
 
+    this.sfx.typeLetter();
     this.activeProjectile.addLetter(key, index);
   }
 
@@ -592,6 +608,7 @@ export class GameScene extends Phaser.Scene {
         }
         // Lock the sweep angle at the moment of submission
         runtimeConfig.launchAngle = this.sweepAngle;
+        this.sfx.launch();
         this.activeProjectile.launch();
         this.gameState.phase = GamePhase.WatchingImpact;
 
@@ -610,6 +627,7 @@ export class GameScene extends Phaser.Scene {
       }
     } else {
       this.wrongAttempts++;
+      this.sfx.error();
       this.feedbackText.setText('Try again!');
       this.inputManager.clear();
 
@@ -655,10 +673,22 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Push a projectile to oldProjectiles and auto-destroy it after 4 seconds. */
+  private retireProjectile(proj: WordProjectile): void {
+    this.oldProjectiles.push(proj);
+    this.time.delayedCall(4000, () => {
+      const idx = this.oldProjectiles.indexOf(proj);
+      if (idx !== -1) {
+        this.oldProjectiles.splice(idx, 1);
+        proj.destroy();
+      }
+    });
+  }
+
   private handleMiss(): void {
     // Word missed the building — clean up and move on
     if (this.activeProjectile) {
-      this.oldProjectiles.push(this.activeProjectile);
+      this.retireProjectile(this.activeProjectile);
       this.activeProjectile = null;
     }
     this.presentNextWord();
@@ -701,8 +731,15 @@ export class GameScene extends Phaser.Scene {
       isSuper = this.activeProjectile.isSuper;
       isOnFire = this.activeProjectile.isOnFire;
       this.activeProjectile.shatter();
-      this.oldProjectiles.push(this.activeProjectile);
+      this.retireProjectile(this.activeProjectile);
       this.activeProjectile = null;
+    }
+
+    // Impact SFX
+    if (isSuper || isOnFire) {
+      this.sfx.impactBig();
+    } else {
+      this.sfx.impactSmall();
     }
 
     // Screen shake — stronger for powered-up projectiles
@@ -720,12 +757,20 @@ export class GameScene extends Phaser.Scene {
 
     this.gameState.wordsCompleted++;
 
-    this.time.delayedCall(1500, () => {
+    this.time.delayedCall(2500, () => {
       this.checkBuildingStatus();
     });
   }
 
   private checkBuildingStatus(): void {
+    // If threshold was already crossed (by update() loop), skip — that handler will finish the job
+    if (
+      this.thresholdCrossed ||
+      this.gameState.phase === GamePhase.LevelComplete ||
+      this.gameState.phase === GamePhase.TransitionToNext
+    )
+      return;
+
     // Win when remaining height is below 40% of the original
     const threshold = this.originalBuildingHeight * 0.4;
     if (this.building.getCurrentHeight() < threshold) {
@@ -736,6 +781,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleBuildingDestroyed(): void {
+    // Guard against double invocation from checkBuildingStatus + update() threshold detection
+    if (
+      this.gameState.phase === GamePhase.LevelComplete ||
+      this.gameState.phase === GamePhase.TransitionToNext
+    )
+      return;
+
     this.gameState.phase = GamePhase.LevelComplete;
     this.gameState.advanceBuilding();
 
@@ -769,6 +821,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '32px',
         color: COLOR_STRINGS.support,
+        resolution: DPR,
       })
       .setOrigin(0.5)
       .setDepth(20)
@@ -794,6 +847,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleLevelComplete(): void {
+    this.sfx.victory();
     // Full celebration for game completion
     // Confetti burst from multiple points
     for (let i = 0; i < 5; i++) {
@@ -815,6 +869,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '64px',
         color: COLOR_STRINGS.secondary,
+        resolution: DPR,
       })
       .setOrigin(0.5)
       .setDepth(20)
@@ -905,6 +960,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '72px',
         color: COLOR_STRINGS.primary,
+        resolution: DPR,
       })
       .setOrigin(0.5)
       .setDepth(20);
@@ -918,6 +974,7 @@ export class GameScene extends Phaser.Scene {
           fontFamily: FONT_FAMILY,
           fontSize: '28px',
           color: COLOR_STRINGS.neutral,
+          resolution: DPR,
         }
       )
       .setOrigin(0.5)
@@ -956,6 +1013,7 @@ export class GameScene extends Phaser.Scene {
       this.building.destroy();
     }
     this.audioManager.cancel();
+    this.sfx.destroy();
     if (this.debugPanel) {
       this.debugPanel.destroy();
     }
@@ -967,7 +1025,7 @@ export class GameScene extends Phaser.Scene {
       this.gameState.phase === GamePhase.ShowingWord ||
       this.gameState.phase === GamePhase.WaitingForInput;
     if (sweepActive) {
-      this.sweepAngle = 20 + 10 * Math.sin(this.time.now * 0.0025);
+      this.sweepAngle = 15 + 10 * Math.sin(this.time.now * 0.0025);
       runtimeConfig.launchAngle = this.sweepAngle;
       this.drawSweepIndicator();
     } else {
@@ -994,6 +1052,10 @@ export class GameScene extends Phaser.Scene {
           ) {
             this.inputManager.disable();
             this.time.delayedCall(600, () => {
+              // Cancel any in-progress word presentation
+              this.wordDisplayText.setVisible(false);
+              this.wordDisplayBg.setVisible(false);
+              this.hearAgainBtn.setVisible(false);
               this.handleBuildingDestroyed();
             });
           }

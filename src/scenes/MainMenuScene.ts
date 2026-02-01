@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { FONT_FAMILY, COLOR_STRINGS, COLORS, GAME_WIDTH, GAME_HEIGHT } from '../config';
+import { DPR, FONT_FAMILY, COLOR_STRINGS, COLORS, GAME_WIDTH, GAME_HEIGHT } from '../config';
 
 export class MainMenuScene extends Phaser.Scene {
   constructor() {
@@ -13,6 +13,7 @@ export class MainMenuScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '72px',
         color: COLOR_STRINGS.primary,
+        resolution: DPR,
       })
       .setOrigin(0.5);
 
@@ -22,6 +23,7 @@ export class MainMenuScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '28px',
         color: COLOR_STRINGS.neutral,
+        resolution: DPR,
       })
       .setOrigin(0.5);
 
@@ -46,6 +48,7 @@ export class MainMenuScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '36px',
         color: COLOR_STRINGS.white,
+        resolution: DPR,
       })
       .setOrigin(0.5);
 

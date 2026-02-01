@@ -12,11 +12,47 @@ export class Building {
   private scene: Phaser.Scene;
   private blocks: Block[] = [];
   private config: BuildingConfig;
+  private effectiveGroundY: number;
+  private pedestalBody: MatterJS.BodyType | null = null;
+  private pedestalVisual: Phaser.GameObjects.Rectangle | null = null;
 
   constructor(scene: Phaser.Scene, config: BuildingConfig) {
     this.scene = scene;
     this.config = config;
+    this.effectiveGroundY = config.groundY - config.pedestalHeight;
+    this.generatePedestal();
     this.generate();
+  }
+
+  private generatePedestal(): void {
+    if (this.config.pedestalHeight <= 0) return;
+
+    const { x, groundY, pedestalHeight, columns, blockWidth } = this.config;
+    const pedW = columns * blockWidth + 20;
+    const pedH = pedestalHeight;
+    const pedY = groundY - pedH / 2;
+
+    this.pedestalVisual = this.scene.add.rectangle(
+      x,
+      pedY,
+      pedW,
+      pedH,
+      COLORS.neutral,
+      0.15
+    );
+
+    this.pedestalBody = this.scene.matter.add.rectangle(x, pedY, pedW, pedH, {
+      isStatic: true,
+      label: 'pedestal',
+      collisionFilter: {
+        category: CollisionCategory.Ground,
+        mask:
+          CollisionCategory.Default |
+          CollisionCategory.WordLetter |
+          CollisionCategory.BuildingBlock |
+          CollisionCategory.Rubble,
+      },
+    });
   }
 
   private generate(): void {
@@ -30,6 +66,12 @@ export class Building {
       case 'offset':
         this.generateOffset();
         break;
+      case 'bridge':
+        this.generateBridge();
+        break;
+      case 'castle':
+        this.generateCastle();
+        break;
       case 'stack':
       default:
         this.generateStack();
@@ -38,8 +80,8 @@ export class Building {
   }
 
   private generateStack(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x, groundY } =
-      this.config;
+    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
+    const groundY = this.effectiveGroundY;
     const rows = Math.ceil(totalBlocks / columns);
     let blockCount = 0;
 
@@ -54,8 +96,8 @@ export class Building {
   }
 
   private generatePyramid(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x, groundY } =
-      this.config;
+    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
+    const groundY = this.effectiveGroundY;
     let blockCount = 0;
     let rowCols = columns;
     let row = 0;
@@ -73,8 +115,8 @@ export class Building {
   }
 
   private generateTower(): void {
-    const { totalBlocks, blockWidth, blockHeight, x, groundY } = this.config;
-    // Tower: 1-2 columns wide, tall
+    const { totalBlocks, blockWidth, blockHeight, x } = this.config;
+    const groundY = this.effectiveGroundY;
     const cols = Math.min(2, this.config.columns);
     let blockCount = 0;
     let row = 0;
@@ -91,19 +133,98 @@ export class Building {
   }
 
   private generateOffset(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x, groundY } =
-      this.config;
+    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
+    const groundY = this.effectiveGroundY;
     const rows = Math.ceil(totalBlocks / columns);
     let blockCount = 0;
 
     for (let row = 0; row < rows && blockCount < totalBlocks; row++) {
-      // Alternate rows are offset by half a block width
       const offsetX = row % 2 === 1 ? blockWidth * 0.5 : 0;
       for (let col = 0; col < columns && blockCount < totalBlocks; col++) {
         const bx = x + (col - (columns - 1) / 2) * blockWidth + offsetX;
         const by = groundY - blockHeight / 2 - row * blockHeight;
         this.addBlock(bx, by, blockWidth, blockHeight, row, col);
         blockCount++;
+      }
+    }
+  }
+
+  /** Two pillars with a span of blocks across the top. */
+  private generateBridge(): void {
+    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
+    const groundY = this.effectiveGroundY;
+    const pillarWidth = 2;
+    const spanCols = Math.max(columns, pillarWidth * 2 + 2);
+
+    // Distribute blocks: span rows on top, rest in pillars
+    const spanRows = Math.max(1, Math.floor(totalBlocks * 0.15));
+    const pillarBlocks = totalBlocks - spanRows * spanCols;
+    const pillarRows = Math.ceil(pillarBlocks / (pillarWidth * 2));
+
+    let blockCount = 0;
+
+    // Build pillars
+    for (let row = 0; row < pillarRows && blockCount < totalBlocks - spanRows * spanCols; row++) {
+      // Left pillar
+      for (let col = 0; col < pillarWidth && blockCount < totalBlocks - spanRows * spanCols; col++) {
+        const bx = x + (col - (spanCols - 1) / 2) * blockWidth;
+        const by = groundY - blockHeight / 2 - row * blockHeight;
+        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
+        blockCount++;
+      }
+      // Right pillar
+      for (let col = spanCols - pillarWidth; col < spanCols && blockCount < totalBlocks - spanRows * spanCols; col++) {
+        const bx = x + (col - (spanCols - 1) / 2) * blockWidth;
+        const by = groundY - blockHeight / 2 - row * blockHeight;
+        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
+        blockCount++;
+      }
+    }
+
+    // Build span across top
+    for (let row = 0; row < spanRows; row++) {
+      const spanRow = pillarRows + row;
+      for (let col = 0; col < spanCols && blockCount < totalBlocks; col++) {
+        const bx = x + (col - (spanCols - 1) / 2) * blockWidth;
+        const by = groundY - blockHeight / 2 - spanRow * blockHeight;
+        this.addBlock(bx, by, blockWidth, blockHeight, spanRow, col);
+        blockCount++;
+      }
+    }
+  }
+
+  /** Alternating tall/short columns creating a battlement profile. */
+  private generateCastle(): void {
+    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
+    const groundY = this.effectiveGroundY;
+
+    // Base wall height: ~40% of estimated total rows
+    const estRows = Math.ceil(totalBlocks / columns);
+    const baseRows = Math.max(2, Math.floor(estRows * 0.4));
+    const turretRows = estRows - baseRows;
+
+    let blockCount = 0;
+
+    // Base wall: full width
+    for (let row = 0; row < baseRows && blockCount < totalBlocks; row++) {
+      for (let col = 0; col < columns && blockCount < totalBlocks; col++) {
+        const bx = x + (col - (columns - 1) / 2) * blockWidth;
+        const by = groundY - blockHeight / 2 - row * blockHeight;
+        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
+        blockCount++;
+      }
+    }
+
+    // Turrets: every other column extends higher
+    for (let row = baseRows; row < baseRows + turretRows && blockCount < totalBlocks; row++) {
+      for (let col = 0; col < columns && blockCount < totalBlocks; col++) {
+        // Only place blocks on even columns (turrets)
+        if (col % 2 === 0) {
+          const bx = x + (col - (columns - 1) / 2) * blockWidth;
+          const by = groundY - blockHeight / 2 - row * blockHeight;
+          this.addBlock(bx, by, blockWidth, blockHeight, row, col);
+          blockCount++;
+        }
       }
     }
   }
@@ -151,10 +272,54 @@ export class Building {
     this.blocks.push({ body, visual });
   }
 
-  /** Compute the initial height from the config (before physics settles). */
+  /** Compute the initial height from the config (before physics settles).
+   *  Includes pedestal height since height is measured from actual ground. */
   getInitialHeight(): number {
-    const rows = Math.ceil(this.config.totalBlocks / this.config.columns);
-    return rows * this.config.blockHeight;
+    const { totalBlocks, columns, blockHeight, pattern, pedestalHeight } =
+      this.config;
+    let rows = 0;
+
+    switch (pattern) {
+      case 'pyramid': {
+        let remaining = totalBlocks;
+        let rowCols = columns;
+        while (remaining > 0 && rowCols > 0) {
+          rows++;
+          remaining -= rowCols;
+          rowCols--;
+        }
+        break;
+      }
+      case 'tower': {
+        const cols = Math.min(2, columns);
+        rows = Math.ceil(totalBlocks / cols);
+        break;
+      }
+      case 'bridge': {
+        const pillarWidth = 2;
+        const spanCols = Math.max(columns, pillarWidth * 2 + 2);
+        const spanRows = Math.max(1, Math.floor(totalBlocks * 0.15));
+        const pillarBlocks = totalBlocks - spanRows * spanCols;
+        const pillarRows = Math.ceil(pillarBlocks / (pillarWidth * 2));
+        rows = pillarRows + spanRows;
+        break;
+      }
+      case 'castle': {
+        const estRows = Math.ceil(totalBlocks / columns);
+        const baseRows = Math.max(2, Math.floor(estRows * 0.4));
+        const baseBlocks = baseRows * columns;
+        const turretBlocks = totalBlocks - baseBlocks;
+        const turretCols = Math.ceil(columns / 2);
+        const turretRows = turretBlocks > 0 ? Math.ceil(turretBlocks / turretCols) : 0;
+        rows = baseRows + turretRows;
+        break;
+      }
+      default:
+        // stack, offset
+        rows = Math.ceil(totalBlocks / columns);
+    }
+
+    return rows * blockHeight + pedestalHeight;
   }
 
   getCurrentHeight(): number {
@@ -178,6 +343,19 @@ export class Building {
       }
       block.visual.x = b.position.x;
     }
+
+    // Shift pedestal too
+    if (this.pedestalBody) {
+      const pb = this.pedestalBody as any;
+      pb.position.x += dx;
+      pb.positionPrev.x += dx;
+      for (const vert of pb.vertices) {
+        vert.x += dx;
+      }
+    }
+    if (this.pedestalVisual) {
+      this.pedestalVisual.x += dx;
+    }
   }
 
   update(): void {
@@ -193,5 +371,14 @@ export class Building {
       block.visual.destroy();
     }
     this.blocks = [];
+
+    if (this.pedestalBody) {
+      this.scene.matter.world.remove(this.pedestalBody);
+      this.pedestalBody = null;
+    }
+    if (this.pedestalVisual) {
+      this.pedestalVisual.destroy();
+      this.pedestalVisual = null;
+    }
   }
 }

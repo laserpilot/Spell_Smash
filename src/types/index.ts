@@ -1,4 +1,4 @@
-export type BuildingPattern = 'stack' | 'pyramid' | 'tower' | 'offset';
+export type BuildingPattern = 'stack' | 'pyramid' | 'tower' | 'offset' | 'bridge' | 'castle';
 
 export interface BuildingConfig {
   totalBlocks: number;
@@ -8,6 +8,7 @@ export interface BuildingConfig {
   x: number;
   groundY: number;
   pattern: BuildingPattern;
+  pedestalHeight: number;
 }
 
 export enum GamePhase {

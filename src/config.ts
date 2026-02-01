@@ -1,3 +1,4 @@
+export const DPR = window.devicePixelRatio || 1;
 export const GAME_WIDTH = 1280;
 export const GAME_HEIGHT = 720;
 
@@ -44,6 +45,7 @@ export const LAYOUT = {
   inputX: 60,
   inputY: 620,
   buildingHeightThreshold: 50,
+  pedestalHeight: 80,
 } as const;
 
 export const LETTER = {

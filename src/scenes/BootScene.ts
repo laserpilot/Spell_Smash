@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { WebFontFile } from '../WebFontFile';
-import { FONT_FAMILY, COLOR_STRINGS, GAME_WIDTH, GAME_HEIGHT } from '../config';
+import { DPR, FONT_FAMILY, COLOR_STRINGS, GAME_WIDTH, GAME_HEIGHT } from '../config';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -12,6 +12,7 @@ export class BootScene extends Phaser.Scene {
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'Loading...', {
         fontSize: '24px',
         color: COLOR_STRINGS.primary,
+        resolution: DPR,
       })
       .setOrigin(0.5);
 
