@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BuildingConfig, BuildingPattern, GamePhase } from '../types';
-import { BLOCK, LAYOUT } from '../config';
+import { LAYOUT } from '../config';
+import { runtimeConfig } from '../RuntimeConfig';
 
 interface BuildingLevel {
   totalBlocks: number;
@@ -10,14 +11,14 @@ interface BuildingLevel {
 
 // 8 buildings of increasing difficulty
 const BUILDING_LEVELS: BuildingLevel[] = [
-  { totalBlocks: 3, columns: 1, patternPool: ['stack'] },
-  { totalBlocks: 5, columns: 2, patternPool: ['stack'] },
-  { totalBlocks: 8, columns: 3, patternPool: ['stack', 'pyramid'] },
-  { totalBlocks: 10, columns: 3, patternPool: ['pyramid', 'tower'] },
-  { totalBlocks: 12, columns: 3, patternPool: ['pyramid', 'tower'] },
-  { totalBlocks: 14, columns: 4, patternPool: ['tower', 'offset'] },
-  { totalBlocks: 16, columns: 4, patternPool: ['offset', 'pyramid'] },
-  { totalBlocks: 20, columns: 5, patternPool: ['stack', 'pyramid', 'tower', 'offset'] },
+  { totalBlocks: 10, columns: 3, patternPool: ['stack'] },
+  { totalBlocks: 15, columns: 3, patternPool: ['stack'] },
+  { totalBlocks: 20, columns: 4, patternPool: ['stack', 'pyramid'] },
+  { totalBlocks: 28, columns: 4, patternPool: ['pyramid', 'tower'] },
+  { totalBlocks: 35, columns: 5, patternPool: ['pyramid', 'tower'] },
+  { totalBlocks: 42, columns: 5, patternPool: ['tower', 'offset'] },
+  { totalBlocks: 50, columns: 6, patternPool: ['offset', 'pyramid'] },
+  { totalBlocks: 60, columns: 6, patternPool: ['stack', 'pyramid', 'tower', 'offset'] },
 ];
 
 export class GameStateManager {
@@ -38,10 +39,12 @@ export class GameStateManager {
       ];
 
     return {
-      totalBlocks: level.totalBlocks,
+      totalBlocks: runtimeConfig.buildingBlockCount > 0
+        ? runtimeConfig.buildingBlockCount
+        : level.totalBlocks,
       columns: level.columns,
-      blockWidth: BLOCK.width,
-      blockHeight: BLOCK.height,
+      blockWidth: runtimeConfig.blockWidth,
+      blockHeight: runtimeConfig.blockHeight,
       x: LAYOUT.buildingX,
       groundY: LAYOUT.groundY,
       pattern,

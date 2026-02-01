@@ -13,6 +13,7 @@ const config: Phaser.Types.Core.GameConfig = {
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
+    zoom: Math.ceil(window.devicePixelRatio || 1),
   },
   physics: {
     default: 'matter',

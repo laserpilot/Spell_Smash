@@ -7,6 +7,7 @@ import {
   COLORS,
 } from '../config';
 import { CollisionCategory } from '../types';
+import { runtimeConfig, getLaunchVelocity } from '../RuntimeConfig';
 
 // Phaser's matter.add.gameObject() mixes physics methods onto the game object.
 // TypeScript doesn't know about these, so we define the shape we use.
@@ -32,6 +33,9 @@ export class WordProjectile {
   private originX: number;
   private originY: number;
 
+  public isOnFire = false;
+  public isSuper = false;
+
   constructor(scene: Phaser.Scene, x: number, y: number) {
     this.scene = scene;
     this.originX = x;
@@ -48,14 +52,15 @@ export class WordProjectile {
   /** Add a single letter to the projectile on the launch pad. */
   addLetter(char: string, index: number): void {
     const totalLetters = index + 1;
-    const x = this.letterX(index, totalLetters);
-    // Start slightly above pad so it drops into place
-    const dropY = this.originY - 50;
+    const padX = this.letterX(index, totalLetters);
+    // Drop from the input box position — letters fall from where you type
+    const inputCharX = runtimeConfig.inputX + 8 + index * 20;
+    const dropY = runtimeConfig.inputY;
     const targetY = this.originY;
 
     // Create visual rectangle as a dynamic physics body from the start
     const rawRect = this.scene.add
-      .rectangle(x, dropY, LETTER.width, LETTER.height, COLORS.primary)
+      .rectangle(inputCharX, dropY, LETTER.width, LETTER.height, COLORS.primary)
       .setDepth(4);
 
     const rect = this.scene.matter.add.gameObject(rawRect, {
@@ -71,8 +76,13 @@ export class WordProjectile {
       },
     }) as MatterRect;
 
+    // Lock rotation while on the pad (prevents spinning)
+    const body = rect.body as any;
+    body.inertia = Infinity;
+    body.inverseInertia = 0;
+
     const text = this.scene.add
-      .text(x, dropY, char.toUpperCase(), {
+      .text(inputCharX, dropY, char.toUpperCase(), {
         fontFamily: FONT_FAMILY,
         fontSize: `${LETTER.fontSize}px`,
         color: COLOR_STRINGS.white,
@@ -84,7 +94,7 @@ export class WordProjectile {
     // Pin this letter to its target position on the pad.
     // Phaser's constraint API doesn't accept null bodyB, so we create
     // a tiny invisible static body as the anchor point.
-    const anchor = this.scene.matter.add.rectangle(x, targetY, 1, 1, {
+    const anchor = this.scene.matter.add.rectangle(padX, targetY, 1, 1, {
       isStatic: true,
       label: 'pin_anchor',
       collisionFilter: { category: 0x0000, mask: 0x0000 },
@@ -153,6 +163,25 @@ export class WordProjectile {
     }
   }
 
+  /** Mark this projectile as "on fire" (accuracy bonus). */
+  setOnFire(): void {
+    this.isOnFire = true;
+    for (const letter of this.letters) {
+      letter.rect.fillColor = 0xff8c00; // dark orange
+      letter.text.setColor('#FFF8E1');
+    }
+  }
+
+  /** Mark this projectile as "super" (streak bonus). */
+  setSuper(): void {
+    this.isSuper = true;
+    this.isOnFire = true; // super includes fire
+    for (const letter of this.letters) {
+      letter.rect.fillColor = 0xffd700; // gold
+      letter.text.setColor('#FFFFFF');
+    }
+  }
+
   /** Launch all letters toward the building. */
   launch(): void {
     if (this.launched || this.letters.length === 0) return;
@@ -164,9 +193,24 @@ export class WordProjectile {
       this.scene.matter.world.remove(letter.anchor);
     }
 
-    // Apply launch velocity — bodies are already dynamic with proper mass
+    // Unlock rotation so letters tumble naturally in flight
     for (const letter of this.letters) {
-      letter.rect.setVelocity(PHYSICS.launchVelocity.x, PHYSICS.launchVelocity.y);
+      const body = letter.rect.body as any;
+      // Restore default inertia based on mass and shape
+      const mass = body.mass;
+      const w = LETTER.width;
+      const h = LETTER.height;
+      body.inertia = (mass / 12) * (w * w + h * h);
+      body.inverseInertia = 1 / body.inertia;
+    }
+
+    // Apply launch velocity — bodies are already dynamic with proper mass
+    const speedMult = this.isSuper ? 1.8 : this.isOnFire ? 1.5 : 1;
+    const baseVel = getLaunchVelocity();
+    const vx = baseVel.x * speedMult;
+    const vy = baseVel.y * speedMult;
+    for (const letter of this.letters) {
+      letter.rect.setVelocity(vx, vy);
     }
   }
 
@@ -216,15 +260,24 @@ export class WordProjectile {
     this.linkConstraints = [];
 
     // Apply scatter forces and reclassify as rubble
+    const forceMult = this.isSuper ? 3 : this.isOnFire ? 2 : 1;
     for (const letter of this.letters) {
       letter.rect.applyForce(
         new Phaser.Math.Vector2(
-          Phaser.Math.FloatBetween(-0.02, 0.02),
-          Phaser.Math.FloatBetween(-0.03, 0)
+          Phaser.Math.FloatBetween(-0.02, 0.02) * forceMult,
+          Phaser.Math.FloatBetween(-0.03, 0) * forceMult
         )
       );
       letter.rect.body.collisionFilter.category = CollisionCategory.Rubble;
     }
+  }
+
+  /** Get current positions of all letter bodies (for trail particles). */
+  getLetterPositions(): { x: number; y: number }[] {
+    return this.letters.map((l) => ({
+      x: l.rect.body.position.x,
+      y: l.rect.body.position.y,
+    }));
   }
 
   update(): void {

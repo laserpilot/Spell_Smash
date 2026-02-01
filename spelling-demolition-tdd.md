@@ -1,4 +1,4 @@
-# Word Wreckers: Technical Design Document
+# Sola's Spell Blaster: Technical Design Document
 
 ## Overview
 

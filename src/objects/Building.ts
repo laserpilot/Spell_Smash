@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import { COLORS, PHYSICS } from '../config';
+import { COLORS } from '../config';
 import { BuildingConfig, CollisionCategory } from '../types';
+import { runtimeConfig } from '../RuntimeConfig';
 
 interface Block {
   body: MatterJS.BodyType;
@@ -132,9 +133,9 @@ export class Building {
       blockWidth - 2,
       blockHeight - 2,
       {
-        density: PHYSICS.blockDensity,
-        friction: PHYSICS.blockFriction,
-        restitution: PHYSICS.restitution,
+        density: runtimeConfig.blockDensity,
+        friction: runtimeConfig.blockFriction,
+        restitution: runtimeConfig.restitution,
         label: 'building_block',
         collisionFilter: {
           category: CollisionCategory.BuildingBlock,
@@ -150,6 +151,12 @@ export class Building {
     this.blocks.push({ body, visual });
   }
 
+  /** Compute the initial height from the config (before physics settles). */
+  getInitialHeight(): number {
+    const rows = Math.ceil(this.config.totalBlocks / this.config.columns);
+    return rows * this.config.blockHeight;
+  }
+
   getCurrentHeight(): number {
     if (this.blocks.length === 0) return 0;
     const highestY = Math.min(...this.blocks.map((b) => b.body.position.y));
@@ -158,6 +165,19 @@ export class Building {
 
   isDestroyed(threshold: number): boolean {
     return this.getCurrentHeight() < threshold;
+  }
+
+  /** Shift all block bodies and visuals by dx (used after camera scroll reset). */
+  offsetAllBlocks(dx: number): void {
+    for (const block of this.blocks) {
+      const b = block.body as any;
+      b.position.x += dx;
+      b.positionPrev.x += dx;
+      for (const vert of b.vertices) {
+        vert.x += dx;
+      }
+      block.visual.x = b.position.x;
+    }
   }
 
   update(): void {

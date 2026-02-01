@@ -9,7 +9,7 @@ export class MainMenuScene extends Phaser.Scene {
   create(): void {
     // Title
     this.add
-      .text(GAME_WIDTH / 2, 200, 'Word Wreckers', {
+      .text(GAME_WIDTH / 2, 200, 'Sola\'s Spell Blaster', {
         fontFamily: FONT_FAMILY,
         fontSize: '72px',
         color: COLOR_STRINGS.primary,

@@ -10,18 +10,22 @@ export class Ground {
     const groundThickness = 40;
     const groundCenterY = LAYOUT.groundY + groundThickness / 2;
 
-    this.visual = scene.add.rectangle(
-      GAME_WIDTH / 2,
-      groundCenterY,
-      GAME_WIDTH,
-      groundThickness,
-      COLORS.neutral
-    );
+    // Visual stays fixed on screen (solid color, looks the same everywhere)
+    this.visual = scene.add
+      .rectangle(
+        GAME_WIDTH / 2,
+        groundCenterY,
+        GAME_WIDTH,
+        groundThickness,
+        COLORS.neutral
+      )
+      .setScrollFactor(0);
 
+    // Physics body wider to cover during camera scroll transitions
     this.body = scene.matter.add.rectangle(
-      GAME_WIDTH / 2,
-      groundCenterY,
       GAME_WIDTH,
+      groundCenterY,
+      GAME_WIDTH * 2,
       groundThickness,
       {
         isStatic: true,

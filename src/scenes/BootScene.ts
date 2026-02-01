@@ -19,6 +19,13 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Generate a small particle texture for effects
+    const gfx = this.add.graphics();
+    gfx.fillStyle(0xffffff, 1);
+    gfx.fillRect(0, 0, 6, 6);
+    gfx.generateTexture('particle', 6, 6);
+    gfx.destroy();
+
     this.scene.start('MainMenuScene');
   }
 }

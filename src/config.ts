@@ -24,9 +24,9 @@ export const FONT_FAMILY = 'Fredoka';
 export const PHYSICS = {
   gravity: { x: 0, y: 0.5 },
   wordDensity: 0.008,
-  blockDensity: 0.01,
-  blockFriction: 0.8,
-  restitution: 0.2,
+  blockDensity: 0.004,
+  blockFriction: 0.5,
+  restitution: 0.4,
   launchVelocity: { x: 12, y: -14 },
   constraintStiffness: 0.9,
   missTimeoutMs: 3000,
@@ -54,6 +54,6 @@ export const LETTER = {
 } as const;
 
 export const BLOCK = {
-  width: 80,
-  height: 40,
+  width: 50,
+  height: 25,
 } as const;

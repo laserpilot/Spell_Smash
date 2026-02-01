@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { FONT_FAMILY, COLOR_STRINGS, COLORS, LAYOUT, GAME_WIDTH } from '../config';
+import { FONT_FAMILY, COLOR_STRINGS, COLORS, LAYOUT } from '../config';
+import { runtimeConfig } from '../RuntimeConfig';
 
 export class InputManager {
   private scene: Phaser.Scene;
@@ -21,32 +22,35 @@ export class InputManager {
     // Background for input area
     const inputWidth = 400;
     const inputHeight = 56;
-    this.inputBg = scene.add.graphics().setDepth(9);
+    const ix = runtimeConfig.inputX;
+    const iy = runtimeConfig.inputY;
+    this.inputBg = scene.add.graphics().setDepth(9).setScrollFactor(0);
     this.inputBg.fillStyle(0xffffff, 0.9);
     this.inputBg.fillRoundedRect(
-      LAYOUT.inputX - 8,
-      LAYOUT.inputY - inputHeight / 2 - 4,
+      ix - 8,
+      iy - inputHeight / 2 - 4,
       inputWidth,
       inputHeight,
       12
     );
     this.inputBg.lineStyle(2, COLORS.neutral, 0.4);
     this.inputBg.strokeRoundedRect(
-      LAYOUT.inputX - 8,
-      LAYOUT.inputY - inputHeight / 2 - 4,
+      ix - 8,
+      iy - inputHeight / 2 - 4,
       inputWidth,
       inputHeight,
       12
     );
 
     this.displayText = scene.add
-      .text(LAYOUT.inputX + 8, LAYOUT.inputY, '', {
+      .text(ix + 8, iy, '', {
         fontFamily: FONT_FAMILY,
         fontSize: '36px',
         color: COLOR_STRINGS.primary,
       })
       .setOrigin(0, 0.5)
-      .setDepth(10);
+      .setDepth(10)
+      .setScrollFactor(0);
 
     scene.input.keyboard!.on('keydown', this.handleKeyDown, this);
 
