@@ -1422,6 +1422,7 @@ export class GameScene extends Phaser.Scene {
     if (this.building) {
       this.building.destroy();
     }
+    this.inputManager.destroy();
     this.audioManager.cancel();
     this.sfx.destroy();
     if (this.debugPanel) {
