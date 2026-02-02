@@ -24,6 +24,7 @@ const SESSION_STEP = 2;
 export class MainMenuScene extends Phaser.Scene {
   private selectedDifficulty: Difficulty = 'short';
   private sessionLength = 8;
+  private showWordEnabled = true;
 
   // UI references for redrawing
   private difficultyButtons: {
@@ -35,6 +36,8 @@ export class MainMenuScene extends Phaser.Scene {
   }[] = [];
   private sessionLabel!: Phaser.GameObjects.Text;
   private sessionBarGraphics!: Phaser.GameObjects.Graphics;
+  private checkboxGfx!: Phaser.GameObjects.Graphics;
+  private checkmarkText!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'MainMenuScene' });
@@ -89,6 +92,9 @@ export class MainMenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.createSessionStepper();
+
+    // --- Show Word toggle ---
+    this.createShowWordToggle();
 
     // --- Play button ---
     this.createPlayButton();
@@ -256,11 +262,73 @@ export class MainMenuScene extends Phaser.Scene {
     }
   }
 
+  private createShowWordToggle(): void {
+    const centerX = GAME_WIDTH / 2;
+    const toggleY = 490;
+    const boxSize = 28;
+    const boxX = centerX - 60;
+
+    this.checkboxGfx = this.add.graphics();
+    this.checkmarkText = this.add
+      .text(boxX, toggleY, '✓', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '20px',
+        color: COLOR_STRINGS.white,
+        resolution: DPR,
+      })
+      .setOrigin(0.5);
+
+    this.add
+      .text(boxX + 24, toggleY, 'Show Word', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '20px',
+        color: COLOR_STRINGS.neutral,
+        resolution: DPR,
+      })
+      .setOrigin(0, 0.5);
+
+    const zone = this.add
+      .zone(centerX, toggleY, 180, boxSize + 8)
+      .setInteractive({ useHandCursor: true });
+
+    zone.on('pointerdown', () => {
+      this.showWordEnabled = !this.showWordEnabled;
+      this.refreshShowWordToggle();
+      this.applySettings();
+    });
+
+    this.refreshShowWordToggle();
+  }
+
+  private refreshShowWordToggle(): void {
+    const centerX = GAME_WIDTH / 2;
+    const toggleY = 490;
+    const boxSize = 28;
+    const boxX = centerX - 60;
+
+    this.checkboxGfx.clear();
+    if (this.showWordEnabled) {
+      this.checkboxGfx.fillStyle(COLORS.secondary, 1);
+      this.checkboxGfx.fillRoundedRect(
+        boxX - boxSize / 2, toggleY - boxSize / 2,
+        boxSize, boxSize, 6
+      );
+      this.checkmarkText.setVisible(true);
+    } else {
+      this.checkboxGfx.lineStyle(2, COLORS.neutral, 0.5);
+      this.checkboxGfx.strokeRoundedRect(
+        boxX - boxSize / 2, toggleY - boxSize / 2,
+        boxSize, boxSize, 6
+      );
+      this.checkmarkText.setVisible(false);
+    }
+  }
+
   private createPlayButton(): void {
     const buttonWidth = 220;
     const buttonHeight = 70;
     const buttonX = GAME_WIDTH / 2;
-    const buttonY = 540;
+    const buttonY = 560;
 
     const buttonBg = this.add.graphics();
     buttonBg.fillStyle(COLORS.secondary, 1);
@@ -319,5 +387,6 @@ export class MainMenuScene extends Phaser.Scene {
     runtimeConfig.difficultyMin = opt.min;
     runtimeConfig.difficultyMax = opt.max;
     runtimeConfig.sessionLength = this.sessionLength;
+    runtimeConfig.showWord = this.showWordEnabled;
   }
 }

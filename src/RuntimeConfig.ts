@@ -14,6 +14,7 @@ interface RuntimeConfigShape {
   difficultyMin: number;
   difficultyMax: number;
   sessionLength: number;
+  showWord: boolean;
 }
 
 const DEFAULTS: RuntimeConfigShape = {
@@ -30,6 +31,7 @@ const DEFAULTS: RuntimeConfigShape = {
   difficultyMin: 1,   // Short=1, Medium=2, Long=3
   difficultyMax: 2,   // Short=2, Medium=4, Long=5
   sessionLength: 8,   // 4-24, step by 2
+  showWord: true,     // false = audio-only mode
 };
 
 export const runtimeConfig: RuntimeConfigShape = { ...DEFAULTS };

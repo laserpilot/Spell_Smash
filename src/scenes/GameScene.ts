@@ -194,13 +194,13 @@ export class GameScene extends Phaser.Scene {
 
     // Building counter
     this.buildingLabel = this.add
-      .text(GAME_WIDTH - 120, 30, '', {
+      .text(GAME_WIDTH - 10, 30, '', {
         fontFamily: FONT_FAMILY,
         fontSize: '22px',
         color: COLOR_STRINGS.neutral,
         resolution: DPR,
       })
-      .setOrigin(0.5)
+      .setOrigin(1, 0.5)
       .setDepth(10);
 
     // Streak counter
@@ -626,31 +626,44 @@ export class GameScene extends Phaser.Scene {
 
     this.audioManager.speakWord(this.currentWord);
 
-    this.wordDisplayText.setText(this.currentWord);
-    this.wordDisplayText.setVisible(true);
-    this.wordDisplayText.setScale(0);
-    this.wordDisplayBg.setVisible(true);
-    this.wordDisplayShadow.setVisible(true);
-    this.hintText.setVisible(false);
+    if (runtimeConfig.showWord) {
+      this.wordDisplayText.setText(this.currentWord);
+      this.wordDisplayText.setVisible(true);
+      this.wordDisplayText.setAlpha(1);
+      this.wordDisplayText.setScale(0);
+      this.wordDisplayBg.setVisible(true);
+      this.wordDisplayBg.setAlpha(1);
+      this.wordDisplayShadow.setVisible(true);
+      this.wordDisplayShadow.setAlpha(1);
+      this.hintText.setVisible(false);
 
-    this.tweens.add({
-      targets: this.wordDisplayText,
-      scaleX: 1,
-      scaleY: 1,
-      duration: 400,
-      ease: 'Back.easeOut',
-    });
+      this.tweens.add({
+        targets: this.wordDisplayText,
+        scaleX: 1,
+        scaleY: 1,
+        duration: 400,
+        ease: 'Back.easeOut',
+      });
 
-    this.time.delayedCall(800, () => {
-      if (this.gameState.phase === GamePhase.WaitingForInput) {
-        this.wordDisplayText.setVisible(false);
-        this.wordDisplayBg.setVisible(false);
-        this.wordDisplayShadow.setVisible(false);
-        if (this.wrongAttempts > 0) {
-          this.hintText.setVisible(true);
+      this.time.delayedCall(800, () => {
+        if (this.gameState.phase === GamePhase.WaitingForInput) {
+          this.tweens.add({
+            targets: [this.wordDisplayText, this.wordDisplayBg, this.wordDisplayShadow],
+            alpha: 0,
+            duration: 400,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+              this.wordDisplayText.setVisible(false);
+              this.wordDisplayBg.setVisible(false);
+              this.wordDisplayShadow.setVisible(false);
+              if (this.wrongAttempts > 0) {
+                this.hintText.setVisible(true);
+              }
+            },
+          });
         }
-      }
-    });
+      });
+    }
   }
 
   private startNewBuilding(): void {
@@ -700,31 +713,49 @@ export class GameScene extends Phaser.Scene {
     this.launchPadGfx.setVisible(true);
     this.launchPadShadow.setVisible(true);
 
-    // Show word and speak it (with pop-in animation)
-    this.wordDisplayText.setText(this.currentWord);
-    this.wordDisplayText.setVisible(true);
-    this.wordDisplayText.setScale(0);
-    this.wordDisplayBg.setVisible(true);
-    this.wordDisplayShadow.setVisible(true);
+    // Show word (if enabled) and speak it
     this.hearAgainBtn.setVisible(false);
     this.inputManager.disable();
     this.inputManager.clear();
 
-    this.tweens.add({
-      targets: this.wordDisplayText,
-      scaleX: 1,
-      scaleY: 1,
-      duration: 400,
-      ease: 'Back.easeOut',
-    });
+    if (runtimeConfig.showWord) {
+      this.wordDisplayText.setText(this.currentWord);
+      this.wordDisplayText.setVisible(true);
+      this.wordDisplayText.setAlpha(1);
+      this.wordDisplayText.setScale(0);
+      this.wordDisplayBg.setVisible(true);
+      this.wordDisplayBg.setAlpha(1);
+      this.wordDisplayShadow.setVisible(true);
+      this.wordDisplayShadow.setAlpha(1);
+
+      this.tweens.add({
+        targets: this.wordDisplayText,
+        scaleX: 1,
+        scaleY: 1,
+        duration: 400,
+        ease: 'Back.easeOut',
+      });
+    }
 
     this.audioManager.speakWord(this.currentWord);
 
     this.time.delayedCall(2000, () => {
       if (this.gameState.phase !== GamePhase.ShowingWord) return;
-      this.wordDisplayText.setVisible(false);
-      this.wordDisplayBg.setVisible(false);
-      this.wordDisplayShadow.setVisible(false);
+
+      if (runtimeConfig.showWord) {
+        this.tweens.add({
+          targets: [this.wordDisplayText, this.wordDisplayBg, this.wordDisplayShadow],
+          alpha: 0,
+          duration: 500,
+          ease: 'Quad.easeOut',
+          onComplete: () => {
+            this.wordDisplayText.setVisible(false);
+            this.wordDisplayBg.setVisible(false);
+            this.wordDisplayShadow.setVisible(false);
+          },
+        });
+      }
+
       this.gameState.phase = GamePhase.WaitingForInput;
       this.inputManager.enable();
       this.hearAgainBtn.setVisible(true);
@@ -1070,9 +1101,9 @@ export class GameScene extends Phaser.Scene {
     const phrase = phrases[Phaser.Math.Between(0, phrases.length - 1)];
 
     const fanfareText = this.add
-      .text(LAYOUT.buildingX, LAYOUT.groundY - 150, phrase, {
+      .text(LAYOUT.buildingX + 180, LAYOUT.groundY - 230, phrase, {
         fontFamily: FONT_FAMILY,
-        fontSize: '32px',
+        fontSize: '44px',
         color: COLOR_STRINGS.support,
         resolution: DPR,
       })

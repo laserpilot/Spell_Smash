@@ -1,4 +1,14 @@
-export type BuildingPattern = 'stack' | 'pyramid' | 'tower' | 'offset' | 'bridge' | 'castle' | 'overhang' | 'wall';
+export type BuildingPattern =
+  | 'stack'
+  | 'pyramid'
+  | 'tower'
+  | 'offset'
+  | 'bridge'
+  | 'span'
+  | 'arch'
+  | 'castle'
+  | 'overhang'
+  | 'wall';
 
 export interface BuildingConfig {
   totalBlocks: number;
