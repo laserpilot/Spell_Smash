@@ -18,6 +18,7 @@ export enum GamePhase {
   WatchingImpact = 'WATCHING_IMPACT',
   LevelComplete = 'LEVEL_COMPLETE',
   TransitionToNext = 'TRANSITION_TO_NEXT',
+  GameComplete = 'GAME_COMPLETE',
 }
 
 export enum CollisionCategory {

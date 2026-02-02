@@ -101,7 +101,7 @@ export class Building {
     let rowCols = columns;
     let row = 0;
 
-    while (blockCount < totalBlocks && rowCols > 0) {
+    while (blockCount < totalBlocks) {
       for (let col = 0; col < rowCols && blockCount < totalBlocks; col++) {
         const bx = x + (col - (rowCols - 1) / 2) * blockWidth;
         const by = groundY - blockHeight / 2 - row * blockHeight;
@@ -110,6 +110,10 @@ export class Building {
       }
       row++;
       rowCols--;
+      // Cycle back to full width when pyramid narrows to 0 (stepped ziggurat)
+      if (rowCols <= 0) {
+        rowCols = columns;
+      }
     }
   }
 
@@ -282,10 +286,14 @@ export class Building {
       case 'pyramid': {
         let remaining = totalBlocks;
         let rowCols = columns;
-        while (remaining > 0 && rowCols > 0) {
+        while (remaining > 0) {
+          const placed = Math.min(rowCols, remaining);
           rows++;
-          remaining -= rowCols;
+          remaining -= placed;
           rowCols--;
+          if (rowCols <= 0) {
+            rowCols = columns;
+          }
         }
         break;
       }

@@ -34,6 +34,8 @@ export class GameScene extends Phaser.Scene {
 
   private wordDisplayText!: Phaser.GameObjects.Text;
   private wordDisplayBg!: Phaser.GameObjects.Graphics;
+  private wordDisplayShadow!: Phaser.GameObjects.Graphics;
+  private launchPadShadow!: Phaser.GameObjects.Graphics;
   private feedbackText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private buildingLabel!: Phaser.GameObjects.Text;
@@ -47,6 +49,8 @@ export class GameScene extends Phaser.Scene {
   private confettiEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
   private debugPanel!: DebugPanel;
   private clouds: Phaser.GameObjects.Ellipse[] = [];
+  private streakGlow: Phaser.GameObjects.Graphics | null = null;
+  private streakGlowTween: Phaser.Tweens.Tween | null = null;
   private thresholdLineGfx!: Phaser.GameObjects.Graphics;
   private percentText!: Phaser.GameObjects.Text;
   private originalBuildingHeight = 0;
@@ -97,6 +101,9 @@ export class GameScene extends Phaser.Scene {
     this.audioManager = new AudioManager();
     this.sfx = new SfxManager();
 
+    // Layered gradient background
+    this.drawGradientBackground();
+
     // Background clouds
     this.clouds = [];
     for (let i = 0; i < 5; i++) {
@@ -119,12 +126,24 @@ export class GameScene extends Phaser.Scene {
     // Ground
     this.ground = new Ground(this);
 
-    // Launch pad visual
+    // Launch pad shadow + visual
+    this.launchPadShadow = this.add.graphics().setDepth(2);
     this.launchPadGfx = this.add.graphics().setDepth(3);
     this.drawLaunchPad();
 
     // Angle sweep indicator (drawn each frame in update)
     this.sweepGfx = this.add.graphics().setDepth(3).setScrollFactor(0);
+
+    // Word display shadow
+    this.wordDisplayShadow = this.add.graphics().setDepth(7);
+    this.wordDisplayShadow.fillStyle(0x000000, 0.12);
+    this.wordDisplayShadow.fillRoundedRect(
+      LAYOUT.wordDisplayX - 130 + 3,
+      LAYOUT.wordDisplayY - 45 + 4,
+      260,
+      90,
+      16
+    );
 
     // Word display background
     this.wordDisplayBg = this.add.graphics().setDepth(8);
@@ -210,7 +229,9 @@ export class GameScene extends Phaser.Scene {
     this.restartBtn = this.createRestartButton();
 
     // HUD elements: fixed to camera (don't scroll with the world)
+    this.launchPadShadow.setScrollFactor(0);
     this.launchPadGfx.setScrollFactor(0);
+    this.wordDisplayShadow.setScrollFactor(0);
     this.wordDisplayBg.setScrollFactor(0);
     this.wordDisplayText.setScrollFactor(0);
     this.feedbackText.setScrollFactor(0);
@@ -287,10 +308,15 @@ export class GameScene extends Phaser.Scene {
 
   private drawLaunchPad(): void {
     this.launchPadGfx.clear();
+    this.launchPadShadow.clear();
     const padW = LAYOUT.launchPadWidth;
     const padH = LAYOUT.launchPadHeight;
     const padX = LAYOUT.launchOriginX - padW / 2;
     const padY = LAYOUT.launchOriginY - padH / 2 + 10; // slightly below letter center
+
+    // Shadow
+    this.launchPadShadow.fillStyle(0x000000, 0.1);
+    this.launchPadShadow.fillRoundedRect(padX + 3, padY + 4, padW, padH, 12);
 
     // Shallow bowl / platform shape
     this.launchPadGfx.fillStyle(COLORS.neutral, 0.1);
@@ -299,11 +325,42 @@ export class GameScene extends Phaser.Scene {
     this.launchPadGfx.strokeRoundedRect(padX, padY, padW, padH, 12);
   }
 
+  private drawGradientBackground(): void {
+    const gfx = this.add.graphics().setDepth(-2);
+    const bands = 24;
+    const bandH = Math.ceil(GAME_HEIGHT / bands);
+    const topR = (COLORS.gradientTop >> 16) & 0xff;
+    const topG = (COLORS.gradientTop >> 8) & 0xff;
+    const topB = COLORS.gradientTop & 0xff;
+    const botR = (COLORS.gradientBottom >> 16) & 0xff;
+    const botG = (COLORS.gradientBottom >> 8) & 0xff;
+    const botB = COLORS.gradientBottom & 0xff;
+
+    for (let i = 0; i < bands; i++) {
+      const t = i / (bands - 1);
+      const r = Math.round(topR + (botR - topR) * t);
+      const g = Math.round(topG + (botG - topG) * t);
+      const b = Math.round(topB + (botB - topB) * t);
+      const color = (r << 16) | (g << 8) | b;
+      gfx.fillStyle(color, 1);
+      gfx.fillRect(0, i * bandH, GAME_WIDTH, bandH + 1);
+    }
+
+    // Soft abstract shapes for depth
+    const shapes = this.add.graphics().setDepth(-1).setScrollFactor(0.1);
+    shapes.fillStyle(COLORS.secondary, 0.06);
+    shapes.fillEllipse(200, 500, 300, 200);
+    shapes.fillStyle(COLORS.support, 0.05);
+    shapes.fillEllipse(900, 200, 250, 180);
+    shapes.fillStyle(COLORS.primary, 0.04);
+    shapes.fillEllipse(600, 650, 350, 150);
+  }
+
   private drawSweepIndicator(): void {
     this.sweepGfx.clear();
     const ox = LAYOUT.launchOriginX;
     const oy = LAYOUT.launchOriginY;
-    const lineLen = 120;
+    const lineLen = 240;
 
     // Faded arc showing full sweep range (5°–25°)
     this.sweepGfx.lineStyle(2, COLORS.neutral, 0.2);
@@ -336,10 +393,16 @@ export class GameScene extends Phaser.Scene {
     this.sweepGfx.fillCircle(endX, endY, 5);
   }
 
+  /** Threshold height from ground: pedestal is indestructible, so 40% applies only to blocks. */
+  private getThresholdHeight(totalHeight?: number): number {
+    const h = totalHeight ?? this.originalBuildingHeight;
+    const blockOnly = h - LAYOUT.pedestalHeight;
+    return LAYOUT.pedestalHeight + blockOnly * 0.4;
+  }
+
   private drawThresholdLine(height?: number, centerX?: number): void {
-    const h = height ?? this.originalBuildingHeight;
     const cx = centerX ?? LAYOUT.buildingX;
-    const thresholdHeight = h * 0.4;
+    const thresholdHeight = this.getThresholdHeight(height);
     const lineY = LAYOUT.groundY - thresholdHeight;
 
     // Dashed red line across the building area
@@ -364,7 +427,7 @@ export class GameScene extends Phaser.Scene {
       LAYOUT.buildingX,
       LAYOUT.buildingX + 100,
     ];
-    const burstY = LAYOUT.groundY - this.originalBuildingHeight * 0.4;
+    const burstY = LAYOUT.groundY - this.getThresholdHeight();
 
     for (let i = 0; i < positions.length; i++) {
       this.time.delayedCall(i * 150, () => {
@@ -391,11 +454,12 @@ export class GameScene extends Phaser.Scene {
     if (!this.building || !this.hasHadImpact) return;
     const currentHeight = this.building.getCurrentHeight();
     // Progress toward win: 0% = full building, 100% = at or below threshold line
-    const aboveThreshold = this.originalBuildingHeight * 0.6; // destroyable portion
+    const thresholdH = this.getThresholdHeight();
+    const aboveThreshold = this.originalBuildingHeight - thresholdH;
     const knocked = this.originalBuildingHeight - currentHeight;
     const percent = Math.min(100, Math.max(0, Math.round((knocked / aboveThreshold) * 100)));
     this.percentText.setText(`${percent}%`);
-    const lineY = LAYOUT.groundY - this.originalBuildingHeight * 0.4;
+    const lineY = LAYOUT.groundY - thresholdH;
     this.percentText.setPosition(LAYOUT.buildingX + 160, lineY);
   }
 
@@ -411,34 +475,48 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createHearAgainButton(): Phaser.GameObjects.Container {
-    const btnX = LAYOUT.wordDisplayX;
-    const btnY = LAYOUT.wordDisplayY + 120;
-    const width = 180;
-    const height = 44;
+    const width = 120;
+    const height = 32;
+    const btnX = runtimeConfig.inputX - 8 + width / 2;
+    const btnY = runtimeConfig.inputY + 56 / 2 + 10 + height / 2;
+
+    const shadow = this.add.graphics();
+    shadow.fillStyle(0x000000, 0.1);
+    shadow.fillRoundedRect(-width / 2 + 3, -height / 2 + 4, width, height, 8);
 
     const bg = this.add.graphics();
     bg.fillStyle(COLORS.neutral, 0.15);
-    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 10);
+    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
     bg.lineStyle(1, COLORS.neutral, 0.3);
-    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 10);
+    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
 
     const label = this.add
       .text(0, 0, 'Hear Again', {
         fontFamily: FONT_FAMILY,
-        fontSize: '20px',
+        fontSize: '16px',
         color: COLOR_STRINGS.neutral,
         resolution: DPR,
       })
       .setOrigin(0.5);
 
     const container = this.add
-      .container(btnX, btnY, [bg, label])
+      .container(btnX, btnY, [shadow, bg, label])
       .setDepth(10)
       .setSize(width, height)
       .setInteractive({ useHandCursor: true });
 
+    container.on('pointerover', () => {
+      this.tweens.add({ targets: container, scaleX: 1.05, scaleY: 1.05, duration: 100 });
+    });
+    container.on('pointerout', () => {
+      this.tweens.add({ targets: container, scaleX: 1, scaleY: 1, duration: 100 });
+    });
     container.on('pointerdown', () => {
+      this.tweens.add({ targets: container, scaleX: 0.95, scaleY: 0.95, duration: 50 });
       this.handleHearAgain();
+    });
+    container.on('pointerup', () => {
+      this.tweens.add({ targets: container, scaleX: 1.05, scaleY: 1.05, duration: 50 });
     });
 
     container.setVisible(false);
@@ -487,13 +565,24 @@ export class GameScene extends Phaser.Scene {
 
     this.wordDisplayText.setText(this.currentWord);
     this.wordDisplayText.setVisible(true);
+    this.wordDisplayText.setScale(0);
     this.wordDisplayBg.setVisible(true);
+    this.wordDisplayShadow.setVisible(true);
     this.hintText.setVisible(false);
+
+    this.tweens.add({
+      targets: this.wordDisplayText,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 400,
+      ease: 'Back.easeOut',
+    });
 
     this.time.delayedCall(800, () => {
       if (this.gameState.phase === GamePhase.WaitingForInput) {
         this.wordDisplayText.setVisible(false);
         this.wordDisplayBg.setVisible(false);
+        this.wordDisplayShadow.setVisible(false);
         if (this.wrongAttempts > 0) {
           this.hintText.setVisible(true);
         }
@@ -546,14 +635,25 @@ export class GameScene extends Phaser.Scene {
       LAYOUT.launchOriginY
     );
     this.launchPadGfx.setVisible(true);
+    this.launchPadShadow.setVisible(true);
 
-    // Show word and speak it
+    // Show word and speak it (with pop-in animation)
     this.wordDisplayText.setText(this.currentWord);
     this.wordDisplayText.setVisible(true);
+    this.wordDisplayText.setScale(0);
     this.wordDisplayBg.setVisible(true);
+    this.wordDisplayShadow.setVisible(true);
     this.hearAgainBtn.setVisible(false);
     this.inputManager.disable();
     this.inputManager.clear();
+
+    this.tweens.add({
+      targets: this.wordDisplayText,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 400,
+      ease: 'Back.easeOut',
+    });
 
     this.audioManager.speakWord(this.currentWord);
 
@@ -561,6 +661,7 @@ export class GameScene extends Phaser.Scene {
       if (this.gameState.phase !== GamePhase.ShowingWord) return;
       this.wordDisplayText.setVisible(false);
       this.wordDisplayBg.setVisible(false);
+      this.wordDisplayShadow.setVisible(false);
       this.gameState.phase = GamePhase.WaitingForInput;
       this.inputManager.enable();
       this.hearAgainBtn.setVisible(true);
@@ -599,6 +700,7 @@ export class GameScene extends Phaser.Scene {
       this.hintText.setVisible(false);
       this.hearAgainBtn.setVisible(false);
       this.launchPadGfx.setVisible(false);
+      this.launchPadShadow.setVisible(false);
 
       // Launch the projectile directly — letters are already on the pad
       this.gameState.phase = GamePhase.Launching;
@@ -632,6 +734,7 @@ export class GameScene extends Phaser.Scene {
       }
     } else {
       this.wrongAttempts++;
+      this.gameState.recordWrongAttempt();
       this.sfx.error();
       this.feedbackText.setText('Try again!');
       this.inputManager.clear();
@@ -651,6 +754,7 @@ export class GameScene extends Phaser.Scene {
         this.hintText.setText(this.currentWord[0]);
         this.hintText.setVisible(true);
         this.wordDisplayBg.setVisible(true);
+        this.wordDisplayShadow.setVisible(true);
       }
 
       this.time.delayedCall(1200, () => {
@@ -673,8 +777,67 @@ export class GameScene extends Phaser.Scene {
         duration: 150,
         yoyo: true,
       });
+
+      // Create streak glow if it doesn't exist
+      if (!this.streakGlow) {
+        this.streakGlow = this.add.graphics()
+          .setDepth(this.streakCountText.depth - 1)
+          .setScrollFactor(0);
+        this.drawStreakGlow();
+
+        this.streakGlowTween = this.tweens.add({
+          targets: this.streakGlow,
+          alpha: { from: 0.2, to: 0.5 },
+          scaleX: { from: 0.9, to: 1.15 },
+          scaleY: { from: 0.9, to: 1.15 },
+          duration: 800,
+          yoyo: true,
+          repeat: -1,
+        });
+      }
     } else {
       this.streakCountText.setColor(COLOR_STRINGS.secondary);
+
+      // Remove streak glow
+      if (this.streakGlow) {
+        if (this.streakGlowTween) {
+          this.streakGlowTween.stop();
+          this.streakGlowTween = null;
+        }
+        this.tweens.add({
+          targets: this.streakGlow,
+          alpha: 0,
+          duration: 300,
+          onComplete: () => {
+            if (this.streakGlow) {
+              this.streakGlow.destroy();
+              this.streakGlow = null;
+            }
+          },
+        });
+      }
+    }
+  }
+
+  private drawStreakGlow(): void {
+    if (!this.streakGlow) return;
+    this.streakGlow.clear();
+
+    // Position glow behind streak count text
+    const cx = this.streakCountText.x + this.streakCountText.width / 2;
+    const cy = this.streakCountText.y;
+
+    // Concentric circles for radial glow effect
+    const rings = [
+      { radius: 35, alpha: 0.08 },
+      { radius: 25, alpha: 0.12 },
+      { radius: 16, alpha: 0.18 },
+      { radius: 8, alpha: 0.25 },
+    ];
+
+    for (const ring of rings) {
+      this.streakGlow.fillStyle(0xffd700, ring.alpha);
+      this.streakGlow.fillCircle(cx, cy, ring.radius);
     }
   }
 
@@ -779,7 +942,7 @@ export class GameScene extends Phaser.Scene {
       MatterBody.applyForce(body, body.position, { x: fx, y: fy });
     }
 
-    this.gameState.wordsCompleted++;
+    this.gameState.recordWordComplete();
 
     this.time.delayedCall(2500, () => {
       this.checkBuildingStatus();
@@ -795,8 +958,8 @@ export class GameScene extends Phaser.Scene {
     )
       return;
 
-    // Win when remaining height is below 40% of the original
-    const threshold = this.originalBuildingHeight * 0.4;
+    // Win when remaining height drops below threshold (pedestal + 40% of block height)
+    const threshold = this.getThresholdHeight();
     if (this.building.getCurrentHeight() < threshold) {
       this.thresholdCrossed = true;
       this.handleBuildingDestroyed();
@@ -984,8 +1147,10 @@ export class GameScene extends Phaser.Scene {
             LAYOUT.launchOriginY
           );
           this.launchPadGfx.setVisible(true);
+          this.launchPadShadow.setVisible(true);
           this.wordDisplayText.setVisible(false);
           this.wordDisplayBg.setVisible(false);
+          this.wordDisplayShadow.setVisible(false);
           this.hearAgainBtn.setVisible(true);
           this.feedbackText.setText('');
           this.hintText.setVisible(false);
@@ -1000,36 +1165,140 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleGameComplete(): void {
-    const winText = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'You Win!', {
+    this.gameState.phase = GamePhase.GameComplete;
+    this.inputManager.disable();
+    this.hearAgainBtn.setVisible(false);
+    this.launchPadGfx.setVisible(false);
+    this.launchPadShadow.setVisible(false);
+    this.sweepGfx.clear();
+    this.wordDisplayText.setVisible(false);
+    this.wordDisplayBg.setVisible(false);
+    if (this.wordDisplayShadow) this.wordDisplayShadow.setVisible(false);
+    this.feedbackText.setVisible(false);
+    this.hintText.setVisible(false);
+
+    // Panel dimensions
+    const panelW = 500;
+    const panelH = 420;
+    const panelX = GAME_WIDTH / 2 - panelW / 2;
+    const panelY = GAME_HEIGHT / 2 - panelH / 2;
+
+    // Container to hold everything (for bounce-in animation)
+    const statsContainer = this.add.container(GAME_WIDTH / 2, GAME_HEIGHT / 2)
+      .setDepth(25)
+      .setScrollFactor(0)
+      .setScale(0);
+
+    // Panel shadow
+    const panelShadow = this.add.graphics();
+    panelShadow.fillStyle(0x000000, 0.12);
+    panelShadow.fillRoundedRect(-panelW / 2 + 4, -panelH / 2 + 5, panelW, panelH, 20);
+    statsContainer.add(panelShadow);
+
+    // Panel background
+    const panelBg = this.add.graphics();
+    panelBg.fillStyle(0xffffff, 0.95);
+    panelBg.fillRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 20);
+    panelBg.lineStyle(2, COLORS.secondary, 0.4);
+    panelBg.strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 20);
+    statsContainer.add(panelBg);
+
+    // Title
+    const title = this.add.text(0, -panelH / 2 + 50, 'Great Job!', {
+      fontFamily: FONT_FAMILY,
+      fontSize: '48px',
+      color: COLOR_STRINGS.primary,
+      resolution: DPR,
+    }).setOrigin(0.5);
+    statsContainer.add(title);
+
+    // Divider line
+    const divider = this.add.graphics();
+    divider.lineStyle(2, COLORS.neutral, 0.2);
+    divider.beginPath();
+    divider.moveTo(-panelW / 2 + 40, -panelH / 2 + 90);
+    divider.lineTo(panelW / 2 - 40, -panelH / 2 + 90);
+    divider.strokePath();
+    statsContainer.add(divider);
+
+    // Stats rows
+    const statsData = [
+      { label: 'Words Spelled', value: String(this.gameState.wordsCompleted) },
+      { label: 'Perfect Words', value: String(this.gameState.perfectWords) },
+      { label: 'Best Streak', value: String(this.gameState.bestStreak) },
+      { label: 'Accuracy', value: `${this.gameState.getAccuracyPercent()}%` },
+    ];
+
+    const startY = -panelH / 2 + 120;
+    const rowH = 50;
+    for (let i = 0; i < statsData.length; i++) {
+      const rowLabel = this.add.text(-panelW / 2 + 60, startY + i * rowH, statsData[i].label, {
         fontFamily: FONT_FAMILY,
-        fontSize: '72px',
+        fontSize: '28px',
+        color: COLOR_STRINGS.neutral,
+        resolution: DPR,
+      }).setOrigin(0, 0.5);
+      statsContainer.add(rowLabel);
+
+      const rowValue = this.add.text(panelW / 2 - 60, startY + i * rowH, statsData[i].value, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '28px',
         color: COLOR_STRINGS.primary,
         resolution: DPR,
-      })
-      .setOrigin(0.5)
-      .setDepth(20);
+      }).setOrigin(1, 0.5);
+      statsContainer.add(rowValue);
+    }
 
-    const statsText = this.add
-      .text(
-        GAME_WIDTH / 2,
-        GAME_HEIGHT / 2 + 70,
-        `Words spelled: ${this.gameState.wordsCompleted}`,
-        {
-          fontFamily: FONT_FAMILY,
-          fontSize: '28px',
-          color: COLOR_STRINGS.neutral,
-          resolution: DPR,
-        }
-      )
-      .setOrigin(0.5)
-      .setDepth(20);
+    // Play Again button
+    const btnW = 220;
+    const btnH = 60;
+    const btnY = panelH / 2 - 60;
 
-    this.time.delayedCall(4000, () => {
-      winText.destroy();
-      statsText.destroy();
+    const btnShadow = this.add.graphics();
+    btnShadow.fillStyle(0x000000, 0.1);
+    btnShadow.fillRoundedRect(-btnW / 2 + 3, btnY - btnH / 2 + 4, btnW, btnH, 14);
+    statsContainer.add(btnShadow);
+
+    const btnBg = this.add.graphics();
+    btnBg.fillStyle(COLORS.secondary, 1);
+    btnBg.fillRoundedRect(-btnW / 2, btnY - btnH / 2, btnW, btnH, 14);
+    statsContainer.add(btnBg);
+
+    const btnLabel = this.add.text(0, btnY, 'Play Again', {
+      fontFamily: FONT_FAMILY,
+      fontSize: '32px',
+      color: COLOR_STRINGS.white,
+      resolution: DPR,
+    }).setOrigin(0.5);
+    statsContainer.add(btnLabel);
+
+    // Button hit zone
+    const btnZone = this.add.zone(0, btnY, btnW, btnH)
+      .setInteractive({ useHandCursor: true });
+    statsContainer.add(btnZone);
+
+    btnZone.on('pointerover', () => {
+      btnBg.clear();
+      btnBg.fillStyle(0x52b0a5, 1);
+      btnBg.fillRoundedRect(-btnW / 2, btnY - btnH / 2, btnW, btnH, 14);
+    });
+    btnZone.on('pointerout', () => {
+      btnBg.clear();
+      btnBg.fillStyle(COLORS.secondary, 1);
+      btnBg.fillRoundedRect(-btnW / 2, btnY - btnH / 2, btnW, btnH, 14);
+    });
+    btnZone.on('pointerdown', () => {
       this.cleanupAll();
       this.scene.start('MainMenuScene');
+    });
+
+    // Bounce-in animation
+    this.tweens.add({
+      targets: statsContainer,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 600,
+      ease: 'Back.easeOut',
     });
   }
 
@@ -1065,13 +1334,19 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(): void {
-    // Angle sweep indicator — oscillates 10°–30° during input phases
-    const sweepActive =
+    // Angle sweep — keep oscillating during input phases so value stays current
+    const sweepPhase =
       this.gameState.phase === GamePhase.ShowingWord ||
       this.gameState.phase === GamePhase.WaitingForInput;
-    if (sweepActive) {
+    if (sweepPhase) {
       this.sweepAngle = 15 + 10 * Math.sin(this.time.now * 0.0025);
       runtimeConfig.launchAngle = this.sweepAngle;
+    }
+    // Only draw the indicator when the player has typed at least one letter
+    const showSweep =
+      this.gameState.phase === GamePhase.WaitingForInput &&
+      this.inputManager.getTypedText().length > 0;
+    if (showSweep) {
       this.drawSweepIndicator();
     } else {
       this.sweepGfx.clear();
@@ -1086,7 +1361,7 @@ export class GameScene extends Phaser.Scene {
 
       // Check if building just crossed below threshold
       if (this.hasHadImpact && !this.thresholdCrossed) {
-        const threshold = this.originalBuildingHeight * 0.4;
+        const threshold = this.getThresholdHeight();
         if (this.building.getCurrentHeight() < threshold) {
           this.thresholdCrossed = true;
           this.playThresholdFireworks();

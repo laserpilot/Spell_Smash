@@ -13,18 +13,22 @@ interface BuildingLevel {
 const BUILDING_LEVELS: BuildingLevel[] = [
   { totalBlocks: 10, columns: 3, patternPool: ['stack'] },
   { totalBlocks: 15, columns: 3, patternPool: ['stack'] },
-  { totalBlocks: 20, columns: 4, patternPool: ['stack', 'pyramid'] },
-  { totalBlocks: 28, columns: 4, patternPool: ['pyramid', 'tower', 'bridge'] },
-  { totalBlocks: 35, columns: 5, patternPool: ['pyramid', 'tower', 'bridge'] },
+  { totalBlocks: 20, columns: 4, patternPool: ['stack'] },
+  { totalBlocks: 28, columns: 4, patternPool: ['tower', 'bridge'] },
+  { totalBlocks: 35, columns: 5, patternPool: ['tower', 'bridge'] },
   { totalBlocks: 42, columns: 5, patternPool: ['tower', 'offset', 'castle'] },
-  { totalBlocks: 50, columns: 6, patternPool: ['offset', 'pyramid', 'castle'] },
-  { totalBlocks: 60, columns: 6, patternPool: ['stack', 'pyramid', 'tower', 'offset', 'bridge', 'castle'] },
+  { totalBlocks: 50, columns: 6, patternPool: ['offset', 'castle'] },
+  { totalBlocks: 60, columns: 6, patternPool: ['stack', 'tower', 'offset', 'bridge', 'castle'] },
 ];
 
 export class GameStateManager {
   public currentBuildingIndex = 0;
   public wordsCompleted = 0;
   public streak = 0;
+  public bestStreak = 0;
+  public perfectWords = 0;
+  public totalWrongAttempts = 0;
+  public currentWordMistakes = 0;
   public phase: GamePhase = GamePhase.ShowingWord;
 
   getBuildingConfig(): BuildingConfig {
@@ -62,16 +66,39 @@ export class GameStateManager {
 
   incrementStreak(): void {
     this.streak++;
+    this.bestStreak = Math.max(this.bestStreak, this.streak);
   }
 
   resetStreak(): void {
     this.streak = 0;
   }
 
+  recordWrongAttempt(): void {
+    this.totalWrongAttempts++;
+    this.currentWordMistakes++;
+  }
+
+  recordWordComplete(): void {
+    this.wordsCompleted++;
+    if (this.currentWordMistakes === 0) {
+      this.perfectWords++;
+    }
+    this.currentWordMistakes = 0;
+  }
+
+  getAccuracyPercent(): number {
+    if (this.wordsCompleted === 0) return 0;
+    return Math.round((this.perfectWords / this.wordsCompleted) * 100);
+  }
+
   reset(): void {
     this.currentBuildingIndex = 0;
     this.wordsCompleted = 0;
     this.streak = 0;
+    this.bestStreak = 0;
+    this.perfectWords = 0;
+    this.totalWrongAttempts = 0;
+    this.currentWordMistakes = 0;
     this.phase = GamePhase.ShowingWord;
   }
 }

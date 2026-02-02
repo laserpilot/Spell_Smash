@@ -23,7 +23,7 @@ const DEFAULTS: RuntimeConfigShape = {
   blockHeight: 20,
   buildingBlockCount: 50,
   inputY: 360, // moved from 620 to vertical middle
-  inputX: LAYOUT.inputX,
+  inputX: LAYOUT.inputX + 30,
 };
 
 export const runtimeConfig: RuntimeConfigShape = { ...DEFAULTS };

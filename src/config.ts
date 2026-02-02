@@ -9,6 +9,8 @@ export const COLORS = {
   support: 0xd8836c, // Clay
   neutral: 0x556070, // Slate
   white: 0xffffff,
+  gradientTop: 0xd6ebff, // Lighter blue
+  gradientBottom: 0xfff5e6, // Warm cream
 } as const;
 
 export const COLOR_STRINGS = {

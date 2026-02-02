@@ -6,6 +6,7 @@ export class InputManager {
   private scene: Phaser.Scene;
   private currentText = '';
   private displayText: Phaser.GameObjects.Text;
+  private inputShadow: Phaser.GameObjects.Graphics;
   private inputBg: Phaser.GameObjects.Graphics;
   private cursorBlink: Phaser.Time.TimerEvent;
   private cursorVisible = true;
@@ -24,6 +25,18 @@ export class InputManager {
     const inputHeight = 56;
     const ix = runtimeConfig.inputX;
     const iy = runtimeConfig.inputY;
+
+    // Input shadow
+    this.inputShadow = scene.add.graphics().setDepth(8).setScrollFactor(0);
+    this.inputShadow.fillStyle(0x000000, 0.1);
+    this.inputShadow.fillRoundedRect(
+      ix - 8 + 3,
+      iy - inputHeight / 2 - 4 + 4,
+      inputWidth,
+      inputHeight,
+      12
+    );
+
     this.inputBg = scene.add.graphics().setDepth(9).setScrollFactor(0);
     this.inputBg.fillStyle(0xffffff, 0.9);
     this.inputBg.fillRoundedRect(
@@ -117,6 +130,7 @@ export class InputManager {
     this.scene.input.keyboard!.off('keydown', this.handleKeyDown, this);
     this.cursorBlink.destroy();
     this.displayText.destroy();
+    this.inputShadow.destroy();
     this.inputBg.destroy();
   }
 }
