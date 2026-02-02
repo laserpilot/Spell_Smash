@@ -20,6 +20,7 @@ type MatterRect = Phaser.GameObjects.Rectangle & {
 
 interface LetterBody {
   rect: MatterRect;
+  visual: Phaser.GameObjects.Graphics;
   text: Phaser.GameObjects.Text;
   pin: MatterJS.ConstraintType;
   anchor: MatterJS.BodyType;
@@ -59,15 +60,18 @@ export class WordProjectile {
     const dropY = runtimeConfig.inputY;
     const targetY = this.originY;
 
-    // Create visual rectangle as a dynamic physics body from the start
+    // Create beveled visual and an invisible physics body
+    const visual = this.createBeveledVisual(LETTER.width, LETTER.height, COLORS.primary);
+    visual.setPosition(inputCharX, dropY).setDepth(4);
+
     const rawRect = this.scene.add
-      .rectangle(inputCharX, dropY, LETTER.width, LETTER.height, COLORS.primary)
+      .rectangle(inputCharX, dropY, LETTER.width, LETTER.height, 0xffffff, 0)
       .setDepth(4);
 
     const rect = this.scene.matter.add.gameObject(rawRect, {
       density: PHYSICS.wordDensity,
-      friction: 0.5,
-      restitution: 0.2,
+      friction: 0.1,
+      restitution: 0.5,
       label: 'word_letter',
       // DYNAMIC from creation — avoids the mass=Infinity bug with isStatic:true
       isStatic: false,
@@ -109,7 +113,7 @@ export class WordProjectile {
       0.15, // soft stiffness so letters settle with a slight bounce
     );
 
-    this.letters.push({ rect, text, pin, anchor });
+    this.letters.push({ rect, visual, text, pin, anchor });
 
     // Link to previous letter with a distance constraint
     if (this.letters.length > 1) {
@@ -144,6 +148,7 @@ export class WordProjectile {
     this.scene.matter.world.remove(removed.anchor);
     this.scene.matter.world.remove(removed.rect.body);
     removed.rect.destroy();
+    removed.visual.destroy();
     removed.text.destroy();
 
     // Re-center remaining letters
@@ -169,7 +174,7 @@ export class WordProjectile {
   setOnFire(): void {
     this.isOnFire = true;
     for (const letter of this.letters) {
-      letter.rect.fillColor = 0xff8c00; // dark orange
+      this.redrawBevel(letter.visual, 0xff8c00); // dark orange
       letter.text.setColor('#FFF8E1');
     }
   }
@@ -179,7 +184,7 @@ export class WordProjectile {
     this.isSuper = true;
     this.isOnFire = true; // super includes fire
     for (const letter of this.letters) {
-      letter.rect.fillColor = 0xffd700; // gold
+      this.redrawBevel(letter.visual, 0xffd700); // gold
       letter.text.setColor('#FFFFFF');
     }
   }
@@ -246,6 +251,7 @@ export class WordProjectile {
       for (const letter of lettersToClean) {
         this.scene.matter.world.remove(letter.rect.body);
         letter.rect.destroy();
+        letter.visual.destroy();
         letter.text.destroy();
       }
     });
@@ -261,7 +267,7 @@ export class WordProjectile {
     }
     this.linkConstraints = [];
 
-    // Apply scatter forces and reclassify as rubble
+    // Apply scatter forces
     const forceMult = this.isSuper ? 3 : this.isOnFire ? 2 : 1;
     for (const letter of this.letters) {
       letter.rect.applyForce(
@@ -270,8 +276,16 @@ export class WordProjectile {
           Phaser.Math.FloatBetween(-0.03, 0) * forceMult
         )
       );
-      letter.rect.body.collisionFilter.category = CollisionCategory.Rubble;
     }
+
+    // Delay rubble conversion so letters can push through multiple blocks
+    this.scene.time.delayedCall(150, () => {
+      for (const letter of this.letters) {
+        if (letter.rect.body) {
+          letter.rect.body.collisionFilter.category = CollisionCategory.Rubble;
+        }
+      }
+    });
   }
 
   /** Get current positions of all letter bodies (for trail particles). */
@@ -287,6 +301,8 @@ export class WordProjectile {
     for (const letter of this.letters) {
       letter.text.setPosition(letter.rect.x, letter.rect.y);
       letter.text.setRotation(letter.rect.rotation);
+      letter.visual.setPosition(letter.rect.x, letter.rect.y);
+      letter.visual.setRotation(letter.rect.rotation);
     }
   }
 
@@ -299,9 +315,59 @@ export class WordProjectile {
       this.scene.matter.world.remove(letter.anchor);
       this.scene.matter.world.remove(letter.rect.body);
       letter.rect.destroy();
+      letter.visual.destroy();
       letter.text.destroy();
     }
     this.letters = [];
     this.linkConstraints = [];
+  }
+
+  private createBeveledVisual(
+    width: number,
+    height: number,
+    baseColor: number
+  ): Phaser.GameObjects.Graphics {
+    const gfx = this.scene.add.graphics();
+    this.drawBevel(gfx, width, height, baseColor);
+    return gfx;
+  }
+
+  private redrawBevel(gfx: Phaser.GameObjects.Graphics, baseColor: number): void {
+    gfx.clear();
+    this.drawBevel(gfx, LETTER.width, LETTER.height, baseColor);
+  }
+
+  private drawBevel(
+    gfx: Phaser.GameObjects.Graphics,
+    width: number,
+    height: number,
+    baseColor: number
+  ): void {
+    const lighter = this.tintColor(baseColor, 1.15);
+    const darker = this.tintColor(baseColor, 0.82);
+    const outline = this.tintColor(baseColor, 0.7);
+
+    const x = -width / 2;
+    const y = -height / 2;
+    const bevelH = Math.max(4, Math.round(height * 0.22));
+
+    gfx.fillStyle(baseColor, 1);
+    gfx.fillRect(x, y, width, height);
+
+    gfx.fillStyle(lighter, 0.9);
+    gfx.fillRect(x, y, width, bevelH);
+
+    gfx.fillStyle(darker, 0.9);
+    gfx.fillRect(x, y + height - bevelH, width, bevelH);
+
+    gfx.lineStyle(2, outline, 0.7);
+    gfx.strokeRect(x + 1, y + 1, width - 2, height - 2);
+  }
+
+  private tintColor(color: number, factor: number): number {
+    const r = Phaser.Math.Clamp(Math.round(((color >> 16) & 0xff) * factor), 0, 255);
+    const g = Phaser.Math.Clamp(Math.round(((color >> 8) & 0xff) * factor), 0, 255);
+    const b = Phaser.Math.Clamp(Math.round((color & 0xff) * factor), 0, 255);
+    return (r << 16) | (g << 8) | b;
   }
 }

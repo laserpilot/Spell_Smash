@@ -1,17 +1,54 @@
 import Phaser from 'phaser';
-import { DPR, FONT_FAMILY, COLOR_STRINGS, COLORS, GAME_WIDTH, GAME_HEIGHT } from '../config';
+import { DPR, FONT_FAMILY, COLOR_STRINGS, COLORS, GAME_WIDTH } from '../config';
+import { runtimeConfig } from '../RuntimeConfig';
+
+type Difficulty = 'short' | 'medium' | 'long';
+
+interface DifficultyOption {
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+}
+
+const DIFFICULTY_OPTIONS: Record<Difficulty, DifficultyOption> = {
+  short:  { label: 'Short',  hint: 'cat, dog, sun',    min: 1, max: 2 },
+  medium: { label: 'Medium', hint: 'jump, ship, look',  min: 2, max: 4 },
+  long:   { label: 'Long',   hint: 'brave, ocean, dream', min: 3, max: 5 },
+};
+
+const SESSION_MIN = 4;
+const SESSION_MAX = 24;
+const SESSION_STEP = 2;
 
 export class MainMenuScene extends Phaser.Scene {
+  private selectedDifficulty: Difficulty = 'short';
+  private sessionLength = 8;
+
+  // UI references for redrawing
+  private difficultyButtons: {
+    key: Difficulty;
+    bg: Phaser.GameObjects.Graphics;
+    label: Phaser.GameObjects.Text;
+    hint: Phaser.GameObjects.Text;
+    zone: Phaser.GameObjects.Zone;
+  }[] = [];
+  private sessionLabel!: Phaser.GameObjects.Text;
+  private sessionBarGraphics!: Phaser.GameObjects.Graphics;
+
   constructor() {
     super({ key: 'MainMenuScene' });
   }
 
   create(): void {
+    // Reset UI references (scene instance is reused by Phaser)
+    this.difficultyButtons = [];
+
     this.cameras.main.setZoom(DPR).setOrigin(0, 0);
 
     // Title
     this.add
-      .text(GAME_WIDTH / 2, 200, 'Sola\'s Spell Blaster', {
+      .text(GAME_WIDTH / 2, 120, 'Sola\'s Spell Smash', {
         fontFamily: FONT_FAMILY,
         fontSize: '72px',
         color: COLOR_STRINGS.primary,
@@ -21,7 +58,7 @@ export class MainMenuScene extends Phaser.Scene {
 
     // Subtitle
     this.add
-      .text(GAME_WIDTH / 2, 280, 'Spell words. Smash buildings.', {
+      .text(GAME_WIDTH / 2, 180, 'Spell words. Smash buildings.', {
         fontFamily: FONT_FAMILY,
         fontSize: '28px',
         color: COLOR_STRINGS.neutral,
@@ -29,11 +66,201 @@ export class MainMenuScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Play button background
+    // --- Difficulty section ---
+    this.add
+      .text(GAME_WIDTH / 2, 255, 'Word Difficulty', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '22px',
+        color: COLOR_STRINGS.neutral,
+        resolution: DPR,
+      })
+      .setOrigin(0.5);
+
+    this.createDifficultyButtons();
+
+    // --- Session length section ---
+    this.sessionLabel = this.add
+      .text(GAME_WIDTH / 2, 390, `Buildings: ${this.sessionLength}`, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '22px',
+        color: COLOR_STRINGS.neutral,
+        resolution: DPR,
+      })
+      .setOrigin(0.5);
+
+    this.createSessionStepper();
+
+    // --- Play button ---
+    this.createPlayButton();
+
+    // Apply defaults to runtimeConfig
+    this.applySettings();
+  }
+
+  private createDifficultyButtons(): void {
+    const keys: Difficulty[] = ['short', 'medium', 'long'];
+    const btnWidth = 160;
+    const btnHeight = 44;
+    const btnGap = 20;
+    const totalWidth = keys.length * btnWidth + (keys.length - 1) * btnGap;
+    const startX = GAME_WIDTH / 2 - totalWidth / 2 + btnWidth / 2;
+    const btnY = 295;
+    const hintY = 330;
+
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const opt = DIFFICULTY_OPTIONS[key];
+      const cx = startX + i * (btnWidth + btnGap);
+
+      const bg = this.add.graphics();
+      const label = this.add
+        .text(cx, btnY, opt.label, {
+          fontFamily: FONT_FAMILY,
+          fontSize: '22px',
+          color: COLOR_STRINGS.white,
+          resolution: DPR,
+        })
+        .setOrigin(0.5);
+
+      const hint = this.add
+        .text(cx, hintY, opt.hint, {
+          fontFamily: FONT_FAMILY,
+          fontSize: '14px',
+          color: COLOR_STRINGS.neutral,
+          resolution: DPR,
+        })
+        .setOrigin(0.5);
+
+      const zone = this.add
+        .zone(cx, btnY, btnWidth, btnHeight)
+        .setInteractive({ useHandCursor: true });
+
+      zone.on('pointerdown', () => {
+        this.selectedDifficulty = key;
+        this.refreshDifficultyButtons();
+        this.applySettings();
+      });
+
+      this.difficultyButtons.push({ key, bg, label, hint, zone });
+    }
+
+    this.refreshDifficultyButtons();
+  }
+
+  private refreshDifficultyButtons(): void {
+    const btnWidth = 160;
+    const btnHeight = 44;
+
+    for (const btn of this.difficultyButtons) {
+      const isSelected = btn.key === this.selectedDifficulty;
+      const cx = btn.zone.x;
+      const cy = btn.zone.y;
+
+      btn.bg.clear();
+      if (isSelected) {
+        btn.bg.fillStyle(COLORS.secondary, 1);
+        btn.bg.fillRoundedRect(
+          cx - btnWidth / 2, cy - btnHeight / 2,
+          btnWidth, btnHeight, 10
+        );
+        btn.label.setColor(COLOR_STRINGS.white);
+      } else {
+        btn.bg.lineStyle(2, COLORS.neutral, 0.5);
+        btn.bg.strokeRoundedRect(
+          cx - btnWidth / 2, cy - btnHeight / 2,
+          btnWidth, btnHeight, 10
+        );
+        btn.label.setColor(COLOR_STRINGS.neutral);
+      }
+    }
+  }
+
+  private createSessionStepper(): void {
+    const centerX = GAME_WIDTH / 2;
+    const stepperY = 430;
+    const arrowSize = 40;
+
+    // Left arrow (◀)
+    const leftBg = this.add.graphics();
+    leftBg.fillStyle(COLORS.neutral, 0.8);
+    leftBg.fillRoundedRect(centerX - 120 - arrowSize / 2, stepperY - arrowSize / 2, arrowSize, arrowSize, 8);
+
+    this.add
+      .text(centerX - 120, stepperY, '◀', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '22px',
+        color: COLOR_STRINGS.white,
+        resolution: DPR,
+      })
+      .setOrigin(0.5);
+
+    const leftZone = this.add
+      .zone(centerX - 120, stepperY, arrowSize, arrowSize)
+      .setInteractive({ useHandCursor: true });
+
+    leftZone.on('pointerdown', () => {
+      this.sessionLength = Math.max(SESSION_MIN, this.sessionLength - SESSION_STEP);
+      this.refreshSessionDisplay();
+      this.applySettings();
+    });
+
+    // Right arrow (▶)
+    const rightBg = this.add.graphics();
+    rightBg.fillStyle(COLORS.neutral, 0.8);
+    rightBg.fillRoundedRect(centerX + 120 - arrowSize / 2, stepperY - arrowSize / 2, arrowSize, arrowSize, 8);
+
+    this.add
+      .text(centerX + 120, stepperY, '▶', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '22px',
+        color: COLOR_STRINGS.white,
+        resolution: DPR,
+      })
+      .setOrigin(0.5);
+
+    const rightZone = this.add
+      .zone(centerX + 120, stepperY, arrowSize, arrowSize)
+      .setInteractive({ useHandCursor: true });
+
+    rightZone.on('pointerdown', () => {
+      this.sessionLength = Math.min(SESSION_MAX, this.sessionLength + SESSION_STEP);
+      this.refreshSessionDisplay();
+      this.applySettings();
+    });
+
+    // Visual bar
+    this.sessionBarGraphics = this.add.graphics();
+    this.refreshSessionDisplay();
+  }
+
+  private refreshSessionDisplay(): void {
+    this.sessionLabel.setText(`Buildings: ${this.sessionLength}`);
+
+    // Draw visual bar
+    const barX = GAME_WIDTH / 2 - 80;
+    const barY = 455;
+    const barWidth = 160;
+    const barHeight = 10;
+    const totalSteps = (SESSION_MAX - SESSION_MIN) / SESSION_STEP;
+    const currentStep = (this.sessionLength - SESSION_MIN) / SESSION_STEP;
+    const fillWidth = (currentStep / totalSteps) * barWidth;
+
+    this.sessionBarGraphics.clear();
+    // Background track
+    this.sessionBarGraphics.fillStyle(COLORS.neutral, 0.2);
+    this.sessionBarGraphics.fillRoundedRect(barX, barY, barWidth, barHeight, 4);
+    // Filled portion
+    if (fillWidth > 0) {
+      this.sessionBarGraphics.fillStyle(COLORS.secondary, 1);
+      this.sessionBarGraphics.fillRoundedRect(barX, barY, fillWidth, barHeight, 4);
+    }
+  }
+
+  private createPlayButton(): void {
     const buttonWidth = 220;
     const buttonHeight = 70;
     const buttonX = GAME_WIDTH / 2;
-    const buttonY = 420;
+    const buttonY = 540;
 
     const buttonBg = this.add.graphics();
     buttonBg.fillStyle(COLORS.secondary, 1);
@@ -45,7 +272,7 @@ export class MainMenuScene extends Phaser.Scene {
       16
     );
 
-    const buttonText = this.add
+    this.add
       .text(buttonX, buttonY, 'PLAY', {
         fontFamily: FONT_FAMILY,
         fontSize: '36px',
@@ -54,20 +281,13 @@ export class MainMenuScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Make button interactive
-    const hitArea = new Phaser.Geom.Rectangle(
-      buttonX - buttonWidth / 2,
-      buttonY - buttonHeight / 2,
-      buttonWidth,
-      buttonHeight
-    );
     const hitZone = this.add
       .zone(buttonX, buttonY, buttonWidth, buttonHeight)
       .setInteractive({ useHandCursor: true });
 
     hitZone.on('pointerover', () => {
       buttonBg.clear();
-      buttonBg.fillStyle(0x52b0a5, 1); // slightly darker mint
+      buttonBg.fillStyle(0x52b0a5, 1);
       buttonBg.fillRoundedRect(
         buttonX - buttonWidth / 2,
         buttonY - buttonHeight / 2,
@@ -92,5 +312,12 @@ export class MainMenuScene extends Phaser.Scene {
     hitZone.on('pointerdown', () => {
       this.scene.start('GameScene');
     });
+  }
+
+  private applySettings(): void {
+    const opt = DIFFICULTY_OPTIONS[this.selectedDifficulty];
+    runtimeConfig.difficultyMin = opt.min;
+    runtimeConfig.difficultyMax = opt.max;
+    runtimeConfig.sessionLength = this.sessionLength;
   }
 }

@@ -1,4 +1,4 @@
-export const DPR = window.devicePixelRatio || 1;
+export const DPR = Math.min(window.devicePixelRatio || 1, 2);
 export const GAME_WIDTH = 1280;
 export const GAME_HEIGHT = 720;
 
@@ -26,7 +26,7 @@ export const FONT_FAMILY = 'Fredoka';
 
 export const PHYSICS = {
   gravity: { x: 0, y: 0.5 },
-  wordDensity: 0.008,
+  wordDensity: 0.02,
   blockDensity: 0.004,
   blockFriction: 0.2,
   restitution: 0.4,

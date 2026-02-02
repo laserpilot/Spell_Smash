@@ -147,12 +147,14 @@ export class GameScene extends Phaser.Scene {
 
     // Word display background
     this.wordDisplayBg = this.add.graphics().setDepth(8);
-    this.wordDisplayBg.fillStyle(0xffffff, 0.7);
-    this.wordDisplayBg.fillRoundedRect(
+    this.drawBeveledPanel(
+      this.wordDisplayBg,
       LAYOUT.wordDisplayX - 130,
       LAYOUT.wordDisplayY - 45,
       260,
       90,
+      0xffffff,
+      0.7,
       16
     );
 
@@ -311,18 +313,24 @@ export class GameScene extends Phaser.Scene {
     this.launchPadShadow.clear();
     const padW = LAYOUT.launchPadWidth;
     const padH = LAYOUT.launchPadHeight;
-    const padX = LAYOUT.launchOriginX - padW / 2;
+    const padX = this.getLaunchPadLeft();
     const padY = LAYOUT.launchOriginY - padH / 2 + 10; // slightly below letter center
 
     // Shadow
     this.launchPadShadow.fillStyle(0x000000, 0.1);
     this.launchPadShadow.fillRoundedRect(padX + 3, padY + 4, padW, padH, 12);
 
-    // Shallow bowl / platform shape
-    this.launchPadGfx.fillStyle(COLORS.neutral, 0.1);
-    this.launchPadGfx.fillRoundedRect(padX, padY, padW, padH, 12);
-    this.launchPadGfx.lineStyle(2, COLORS.neutral, 0.25);
-    this.launchPadGfx.strokeRoundedRect(padX, padY, padW, padH, 12);
+    // Shallow bowl / platform shape with bevel + outline
+    this.drawBeveledPanel(
+      this.launchPadGfx,
+      padX,
+      padY,
+      padW,
+      padH,
+      COLORS.neutral,
+      0.12,
+      12
+    );
   }
 
   private drawGradientBackground(): void {
@@ -356,9 +364,52 @@ export class GameScene extends Phaser.Scene {
     shapes.fillEllipse(600, 650, 350, 150);
   }
 
+  private tintColor(color: number, factor: number): number {
+    const r = Phaser.Math.Clamp(Math.round(((color >> 16) & 0xff) * factor), 0, 255);
+    const g = Phaser.Math.Clamp(Math.round(((color >> 8) & 0xff) * factor), 0, 255);
+    const b = Phaser.Math.Clamp(Math.round((color & 0xff) * factor), 0, 255);
+    return (r << 16) | (g << 8) | b;
+  }
+
+  private drawBeveledPanel(
+    gfx: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    baseColor: number,
+    baseAlpha: number,
+    radius: number
+  ): void {
+    const lighter = this.tintColor(baseColor, 1.15);
+    const darker = this.tintColor(baseColor, 0.85);
+    const outline = this.tintColor(baseColor, 0.7);
+    const bevelH = Math.max(4, Math.round(height * 0.22));
+
+    gfx.fillStyle(baseColor, baseAlpha);
+    gfx.fillRoundedRect(x, y, width, height, radius);
+
+    gfx.fillStyle(lighter, baseAlpha * 0.9);
+    gfx.fillRoundedRect(x, y, width, bevelH, radius);
+
+    gfx.fillStyle(darker, baseAlpha * 0.9);
+    gfx.fillRoundedRect(x, y + height - bevelH, width, bevelH, radius);
+
+    gfx.lineStyle(2, outline, 0.35);
+    gfx.strokeRoundedRect(x + 1, y + 1, width - 2, height - 2, radius);
+  }
+
+  private getLaunchPadLeft(): number {
+    return runtimeConfig.inputX - 8;
+  }
+
+  private getLaunchOriginX(): number {
+    return this.getLaunchPadLeft() + LAYOUT.launchPadWidth / 2;
+  }
+
   private drawSweepIndicator(): void {
     this.sweepGfx.clear();
-    const ox = LAYOUT.launchOriginX;
+    const ox = this.getLaunchOriginX();
     const oy = LAYOUT.launchOriginY;
     const lineLen = 240;
 
@@ -485,10 +536,16 @@ export class GameScene extends Phaser.Scene {
     shadow.fillRoundedRect(-width / 2 + 3, -height / 2 + 4, width, height, 8);
 
     const bg = this.add.graphics();
-    bg.fillStyle(COLORS.neutral, 0.15);
-    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
-    bg.lineStyle(1, COLORS.neutral, 0.3);
-    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
+    this.drawBeveledPanel(
+      bg,
+      -width / 2,
+      -height / 2,
+      width,
+      height,
+      COLORS.neutral,
+      0.15,
+      8
+    );
 
     const label = this.add
       .text(0, 0, 'Hear Again', {
@@ -530,10 +587,16 @@ export class GameScene extends Phaser.Scene {
     const height = 36;
 
     const bg = this.add.graphics();
-    bg.fillStyle(COLORS.support, 0.2);
-    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
-    bg.lineStyle(1, COLORS.support, 0.4);
-    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
+    this.drawBeveledPanel(
+      bg,
+      -width / 2,
+      -height / 2,
+      width,
+      height,
+      COLORS.support,
+      0.2,
+      8
+    );
 
     const label = this.add
       .text(0, 0, 'Restart', {
@@ -631,7 +694,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.activeProjectile = new WordProjectile(
       this,
-      LAYOUT.launchOriginX,
+      this.getLaunchOriginX(),
       LAYOUT.launchOriginY
     );
     this.launchPadGfx.setVisible(true);
@@ -745,7 +808,7 @@ export class GameScene extends Phaser.Scene {
         // Create a fresh projectile for the retry
         this.activeProjectile = new WordProjectile(
           this,
-          LAYOUT.launchOriginX,
+          this.getLaunchOriginX(),
           LAYOUT.launchOriginY
         );
       }
@@ -892,6 +955,9 @@ export class GameScene extends Phaser.Scene {
 
   private handleImpact(impactX: number, impactY: number): void {
     this.hasHadImpact = true;
+    if (this.building) {
+      this.building.releaseBlocks();
+    }
     let isSuper = false;
     let isOnFire = false;
 
@@ -924,10 +990,9 @@ export class GameScene extends Phaser.Scene {
     this.impactEmitter.emitParticleAt(impactX, impactY, particleCount);
 
     // Apply outward force to nearby building blocks for satisfying physics response.
-    // The single-frame collision (letters shatter to Rubble immediately) doesn't
-    // transfer enough momentum on its own, especially for blocks on pedestals.
-    const blastRadius = 150;
-    const blastForce = isSuper ? 0.08 : isOnFire ? 0.06 : 0.04;
+    // Supplements the physical collision (letters persist for 150ms before becoming Rubble).
+    const blastRadius = 200;
+    const blastForce = isSuper ? 0.10 : isOnFire ? 0.07 : 0.05;
     const MatterBody = (Phaser.Physics.Matter as any).Matter.Body;
     const allBodies = this.matter.world.getAllBodies();
     for (const body of allBodies) {
@@ -1143,7 +1208,7 @@ export class GameScene extends Phaser.Scene {
           this.gameState.phase = GamePhase.WaitingForInput;
           this.activeProjectile = new WordProjectile(
             this,
-            LAYOUT.launchOriginX,
+            this.getLaunchOriginX(),
             LAYOUT.launchOriginY
           );
           this.launchPadGfx.setVisible(true);

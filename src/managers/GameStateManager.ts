@@ -13,12 +13,12 @@ interface BuildingLevel {
 const BUILDING_LEVELS: BuildingLevel[] = [
   { totalBlocks: 10, columns: 3, patternPool: ['stack'] },
   { totalBlocks: 15, columns: 3, patternPool: ['stack'] },
-  { totalBlocks: 20, columns: 4, patternPool: ['stack'] },
-  { totalBlocks: 28, columns: 4, patternPool: ['tower', 'bridge'] },
+  { totalBlocks: 20, columns: 4, patternPool: ['stack', 'wall'] },
+  { totalBlocks: 28, columns: 4, patternPool: ['tower', 'bridge', 'wall'] },
   { totalBlocks: 35, columns: 5, patternPool: ['tower', 'bridge'] },
-  { totalBlocks: 42, columns: 5, patternPool: ['tower', 'offset', 'castle'] },
-  { totalBlocks: 50, columns: 6, patternPool: ['offset', 'castle'] },
-  { totalBlocks: 60, columns: 6, patternPool: ['stack', 'tower', 'offset', 'bridge', 'castle'] },
+  { totalBlocks: 42, columns: 5, patternPool: ['tower', 'offset', 'castle', 'overhang'] },
+  { totalBlocks: 50, columns: 6, patternPool: ['offset', 'castle', 'overhang'] },
+  { totalBlocks: 60, columns: 6, patternPool: ['stack', 'tower', 'offset', 'bridge', 'castle', 'overhang', 'wall'] },
 ];
 
 export class GameStateManager {
@@ -61,7 +61,7 @@ export class GameStateManager {
   }
 
   hasMoreBuildings(): boolean {
-    return this.currentBuildingIndex < BUILDING_LEVELS.length;
+    return this.currentBuildingIndex < runtimeConfig.sessionLength;
   }
 
   incrementStreak(): void {

@@ -38,20 +38,14 @@ export class InputManager {
     );
 
     this.inputBg = scene.add.graphics().setDepth(9).setScrollFactor(0);
-    this.inputBg.fillStyle(0xffffff, 0.9);
-    this.inputBg.fillRoundedRect(
+    this.drawBeveledPanel(
+      this.inputBg,
       ix - 8,
       iy - inputHeight / 2 - 4,
       inputWidth,
       inputHeight,
-      12
-    );
-    this.inputBg.lineStyle(2, COLORS.neutral, 0.4);
-    this.inputBg.strokeRoundedRect(
-      ix - 8,
-      iy - inputHeight / 2 - 4,
-      inputWidth,
-      inputHeight,
+      0xffffff,
+      0.9,
       12
     );
 
@@ -132,5 +126,40 @@ export class InputManager {
     this.displayText.destroy();
     this.inputShadow.destroy();
     this.inputBg.destroy();
+  }
+
+  private drawBeveledPanel(
+    gfx: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    baseColor: number,
+    baseAlpha: number,
+    radius: number
+  ): void {
+    const lighter = this.tintColor(baseColor, 1.12);
+    const darker = this.tintColor(baseColor, 0.9);
+    const outline = COLORS.neutral;
+    const bevelH = Math.max(4, Math.round(height * 0.22));
+
+    gfx.fillStyle(baseColor, baseAlpha);
+    gfx.fillRoundedRect(x, y, width, height, radius);
+
+    gfx.fillStyle(lighter, baseAlpha * 0.9);
+    gfx.fillRoundedRect(x, y, width, bevelH, radius);
+
+    gfx.fillStyle(darker, baseAlpha * 0.9);
+    gfx.fillRoundedRect(x, y + height - bevelH, width, bevelH, radius);
+
+    gfx.lineStyle(2, outline, 0.35);
+    gfx.strokeRoundedRect(x + 1, y + 1, width - 2, height - 2, radius);
+  }
+
+  private tintColor(color: number, factor: number): number {
+    const r = Phaser.Math.Clamp(Math.round(((color >> 16) & 0xff) * factor), 0, 255);
+    const g = Phaser.Math.Clamp(Math.round(((color >> 8) & 0xff) * factor), 0, 255);
+    const b = Phaser.Math.Clamp(Math.round((color & 0xff) * factor), 0, 255);
+    return (r << 16) | (g << 8) | b;
   }
 }

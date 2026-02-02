@@ -1,4 +1,4 @@
-# Sola's Spell Blaster
+# Sola's Spell Smash
 
 A spelling practice game for first graders. See a word, hear it spoken aloud, then type it from memory to launch it as a physics projectile at a building made of blocks.
 

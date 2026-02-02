@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { runtimeConfig } from '../RuntimeConfig';
 
 const WORD_TIERS: Record<number, string[]> = {
   // Tier 1: 3-letter CVC words
@@ -98,11 +99,10 @@ export class WordManager {
   }
 
   getDifficultyForBuilding(buildingIndex: number): number {
-    if (buildingIndex <= 0) return 1;
-    if (buildingIndex <= 2) return 2;
-    if (buildingIndex <= 4) return 3;
-    if (buildingIndex <= 6) return 4;
-    return 5;
+    const { difficultyMin, difficultyMax, sessionLength } = runtimeConfig;
+    if (sessionLength <= 1) return difficultyMin;
+    const progress = Math.min(1, buildingIndex / (sessionLength - 1));
+    return Math.round(difficultyMin + (difficultyMax - difficultyMin) * progress);
   }
 
   reset(): void {

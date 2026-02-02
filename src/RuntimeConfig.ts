@@ -11,6 +11,9 @@ interface RuntimeConfigShape {
   buildingBlockCount: number;
   inputY: number;
   inputX: number;
+  difficultyMin: number;
+  difficultyMax: number;
+  sessionLength: number;
 }
 
 const DEFAULTS: RuntimeConfigShape = {
@@ -24,6 +27,9 @@ const DEFAULTS: RuntimeConfigShape = {
   buildingBlockCount: 50,
   inputY: 360, // moved from 620 to vertical middle
   inputX: LAYOUT.inputX + 30,
+  difficultyMin: 1,   // Short=1, Medium=2, Long=3
+  difficultyMax: 2,   // Short=2, Medium=4, Long=5
+  sessionLength: 8,   // 4-24, step by 2
 };
 
 export const runtimeConfig: RuntimeConfigShape = { ...DEFAULTS };
