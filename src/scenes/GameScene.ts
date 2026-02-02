@@ -52,6 +52,7 @@ export class GameScene extends Phaser.Scene {
   private originalBuildingHeight = 0;
   private hasHadImpact = false;
   private thresholdCrossed = false;
+  private wordCarriedOver = false;
   private currentWord = '';
   private impactHandled = false;
   private wrongAttempts = 0;
@@ -66,12 +67,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.cameras.main.setZoom(DPR).setOrigin(0, 0);
+
     // Reset state
     this.activeProjectile = null;
     this.oldProjectiles = [];
     this.impactHandled = false;
     this.hasHadImpact = false;
     this.thresholdCrossed = false;
+    this.wordCarriedOver = false;
     this.wrongAttempts = 0;
     this.usedBackspace = false;
     this.missTimer = null;
@@ -554,6 +558,7 @@ export class GameScene extends Phaser.Scene {
     this.audioManager.speakWord(this.currentWord);
 
     this.time.delayedCall(2000, () => {
+      if (this.gameState.phase !== GamePhase.ShowingWord) return;
       this.wordDisplayText.setVisible(false);
       this.wordDisplayBg.setVisible(false);
       this.gameState.phase = GamePhase.WaitingForInput;
@@ -755,6 +760,25 @@ export class GameScene extends Phaser.Scene {
     const particleCount = isSuper ? 30 : isOnFire ? 20 : 12;
     this.impactEmitter.emitParticleAt(impactX, impactY, particleCount);
 
+    // Apply outward force to nearby building blocks for satisfying physics response.
+    // The single-frame collision (letters shatter to Rubble immediately) doesn't
+    // transfer enough momentum on its own, especially for blocks on pedestals.
+    const blastRadius = 150;
+    const blastForce = isSuper ? 0.08 : isOnFire ? 0.06 : 0.04;
+    const MatterBody = (Phaser.Physics.Matter as any).Matter.Body;
+    const allBodies = this.matter.world.getAllBodies();
+    for (const body of allBodies) {
+      if (body.label !== 'building_block') continue;
+      const dx = body.position.x - impactX;
+      const dy = body.position.y - impactY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > blastRadius || dist < 1) continue;
+      const falloff = 1 - dist / blastRadius;
+      const fx = (dx / dist) * blastForce * falloff;
+      const fy = (dy / dist) * blastForce * falloff;
+      MatterBody.applyForce(body, body.position, { x: fx, y: fy });
+    }
+
     this.gameState.wordsCompleted++;
 
     this.time.delayedCall(2500, () => {
@@ -774,6 +798,7 @@ export class GameScene extends Phaser.Scene {
     // Win when remaining height is below 40% of the original
     const threshold = this.originalBuildingHeight * 0.4;
     if (this.building.getCurrentHeight() < threshold) {
+      this.thresholdCrossed = true;
       this.handleBuildingDestroyed();
     } else {
       this.presentNextWord();
@@ -858,9 +883,9 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Camera zoom pulse
-    this.cameras.main.zoomTo(1.05, 200, 'Sine.easeInOut', false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
+    this.cameras.main.zoomTo(DPR * 1.05, 200, 'Sine.easeInOut', false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress === 1) {
-        this.cameras.main.zoomTo(1, 300, 'Sine.easeInOut');
+        this.cameras.main.zoomTo(DPR, 300, 'Sine.easeInOut');
       }
     });
 
@@ -949,7 +974,27 @@ export class GameScene extends Phaser.Scene {
           cloud.y = Phaser.Math.Between(60, 220);
         }
 
-        this.presentNextWord();
+        if (this.wordCarriedOver) {
+          this.wordCarriedOver = false;
+          // Same word — go straight to WaitingForInput with fresh projectile
+          this.gameState.phase = GamePhase.WaitingForInput;
+          this.activeProjectile = new WordProjectile(
+            this,
+            LAYOUT.launchOriginX,
+            LAYOUT.launchOriginY
+          );
+          this.launchPadGfx.setVisible(true);
+          this.wordDisplayText.setVisible(false);
+          this.wordDisplayBg.setVisible(false);
+          this.hearAgainBtn.setVisible(true);
+          this.feedbackText.setText('');
+          this.hintText.setVisible(false);
+          this.inputManager.enable();
+          // Re-speak word as reminder after the visual interruption
+          this.audioManager.speakWord(this.currentWord);
+        } else {
+          this.presentNextWord();
+        }
       },
     });
   }
@@ -1045,19 +1090,24 @@ export class GameScene extends Phaser.Scene {
         if (this.building.getCurrentHeight() < threshold) {
           this.thresholdCrossed = true;
           this.playThresholdFireworks();
-          // Trigger win if blocks toppled after the 1.5s impact check already ran
+          // Trigger win if blocks toppled after the 2.5s impact check already ran
           if (
             this.gameState.phase !== GamePhase.LevelComplete &&
             this.gameState.phase !== GamePhase.TransitionToNext
           ) {
+            // If a word is active, carry it over to the next building
+            this.wordCarriedOver =
+              this.gameState.phase === GamePhase.ShowingWord ||
+              this.gameState.phase === GamePhase.WaitingForInput;
+
             this.inputManager.disable();
-            this.time.delayedCall(600, () => {
-              // Cancel any in-progress word presentation
-              this.wordDisplayText.setVisible(false);
-              this.wordDisplayBg.setVisible(false);
-              this.hearAgainBtn.setVisible(false);
-              this.handleBuildingDestroyed();
-            });
+            this.inputManager.clear();
+            // Projectile letters are world-space bodies — destroy before scroll
+            if (this.activeProjectile) {
+              this.activeProjectile.destroy();
+              this.activeProjectile = null;
+            }
+            this.handleBuildingDestroyed();
           }
         }
       }

@@ -8,6 +8,8 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
+    this.cameras.main.setZoom(DPR).setOrigin(0, 0);
+
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, 'Loading...', {
         fontSize: '24px',

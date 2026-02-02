@@ -26,7 +26,7 @@ export const PHYSICS = {
   gravity: { x: 0, y: 0.5 },
   wordDensity: 0.008,
   blockDensity: 0.004,
-  blockFriction: 0.5,
+  blockFriction: 0.2,
   restitution: 0.4,
   launchVelocity: { x: 12, y: -14 },
   constraintStiffness: 0.9,

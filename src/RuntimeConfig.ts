@@ -17,7 +17,7 @@ const DEFAULTS: RuntimeConfigShape = {
   launchAngle: 15, // degrees — flat trajectory
   launchForce: 16, // magnitude
   blockDensity: 0.012,
-  blockFriction: PHYSICS.blockFriction,
+  blockFriction: 0.2,
   restitution: PHYSICS.restitution,
   blockWidth: 35,
   blockHeight: 20,

@@ -7,6 +7,8 @@ export class MainMenuScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.cameras.main.setZoom(DPR).setOrigin(0, 0);
+
     // Title
     this.add
       .text(GAME_WIDTH / 2, 200, 'Sola\'s Spell Blaster', {

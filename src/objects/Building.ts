@@ -48,7 +48,6 @@ export class Building {
         category: CollisionCategory.Ground,
         mask:
           CollisionCategory.Default |
-          CollisionCategory.WordLetter |
           CollisionCategory.BuildingBlock |
           CollisionCategory.Rubble,
       },
@@ -344,14 +343,14 @@ export class Building {
       block.visual.x = b.position.x;
     }
 
-    // Shift pedestal too
+    // Shift pedestal too — use Matter.Body.setPosition for static bodies
+    // (direct manipulation doesn't update bounds, breaking collision detection)
     if (this.pedestalBody) {
-      const pb = this.pedestalBody as any;
-      pb.position.x += dx;
-      pb.positionPrev.x += dx;
-      for (const vert of pb.vertices) {
-        vert.x += dx;
-      }
+      const MatterBody = (Phaser.Physics.Matter as any).Matter.Body;
+      MatterBody.setPosition(this.pedestalBody, {
+        x: this.pedestalBody.position.x + dx,
+        y: this.pedestalBody.position.y,
+      });
     }
     if (this.pedestalVisual) {
       this.pedestalVisual.x += dx;
