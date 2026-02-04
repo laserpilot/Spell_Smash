@@ -31,6 +31,10 @@ export class GameStateManager {
   public currentWordMistakes = 0;
   public phase: GamePhase = GamePhase.ShowingWord;
 
+  // Milestone flags (one-time per session)
+  public milestoneStreakFive = false;
+  public milestoneStreakTen = false;
+
   getBuildingConfig(): BuildingConfig {
     const levelIndex = Math.min(
       this.currentBuildingIndex,
@@ -100,5 +104,7 @@ export class GameStateManager {
     this.totalWrongAttempts = 0;
     this.currentWordMistakes = 0;
     this.phase = GamePhase.ShowingWord;
+    this.milestoneStreakFive = false;
+    this.milestoneStreakTen = false;
   }
 }

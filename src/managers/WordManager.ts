@@ -67,6 +67,39 @@ const WORD_TIERS: Record<number, string[]> = {
     'smile', 'smoke', 'snake', 'space', 'spice', 'spoke', 'stamp', 'stand',
     'steam', 'stone', 'store', 'storm', 'stove', 'sugar', 'table', 'teeth',
   ],
+  // Tier 6: Silly words (3-5 letters, phonetic, age-appropriate funny words)
+  6: [
+    // 3 letters
+    'poo', 'bop', 'zap', 'zip', 'yum', 'yay', 'ugh', 'moo', 'oof',
+    // 4 letters
+    'poop', 'fart', 'burp', 'toot', 'bonk', 'boop', 'plop', 'splat',
+    'honk', 'zoom', 'zing', 'wham', 'oops', 'puff', 'poof', 'yuck',
+    // 5 letters
+    'stink', 'goofy', 'plunk', 'clunk', 'thunk', 'stomp', 'flump',
+    'zippy', 'woozy', 'snort', 'grunt', 'sniff', 'plonk', 'whiff',
+  ],
+  // Tier 7: Hard H1 — 6-7 letter decodable words
+  7: [
+    'rocket', 'magnet', 'ladder', 'butter', 'jungle', 'carrot', 'winter',
+    'summer', 'spring', 'planet', 'garden', 'forest', 'ribbon', 'pocket',
+    'puppet', 'mitten', 'cotton', 'basket', 'candle', 'hamper',
+    'thunder', 'blanket', 'pumpkin', 'sandbox', 'toaster', 'napkin',
+    'haircut', 'dentist', 'sunshine', 'toolbox', 'cupcake', 'hamster',
+    'goblins', 'monster',
+  ],
+  // Tier 8: Hard H2 — 8-9 letter decodable words
+  8: [
+    'sandstorm', 'workshop', 'backpack', 'classroom', 'handstand',
+    'snowball', 'sidewalk', 'paintbox', 'notebook', 'campsite',
+    'footstep', 'bulldozer',
+    'windstorm', 'snowflake', 'handprint', 'sandcastle', 'playground',
+    'toothbrush', 'woodworker', 'paintbrush',
+  ],
+  // Tier 9: Hard H3 — 10-12 letter decodable words
+  9: [
+    'playgrounds', 'toothbrushes', 'woodworkshop',
+    'snowboarding', 'handstanders', 'woodworkers',
+  ],
 };
 
 export class WordManager {
@@ -88,7 +121,23 @@ export class WordManager {
   }
 
   private getPoolForDifficulty(difficulty: number): string[] {
-    // Combine tiers based on difficulty level
+    // Tier 6 (silly words) is standalone, not combined with other tiers
+    if (difficulty === 6) {
+      return WORD_TIERS[6];
+    }
+
+    // Tiers 7-9 (hard mode) are standalone, progressively combined
+    if (difficulty >= 7) {
+      const pool: string[] = [];
+      for (let tier = 7; tier <= 9; tier++) {
+        if (tier <= difficulty) {
+          pool.push(...WORD_TIERS[tier]);
+        }
+      }
+      return pool.length > 0 ? pool : WORD_TIERS[7];
+    }
+
+    // Combine tiers based on difficulty level (standard: 1-5)
     const pool: string[] = [];
     for (let tier = 1; tier <= 5; tier++) {
       if (tier <= difficulty) {

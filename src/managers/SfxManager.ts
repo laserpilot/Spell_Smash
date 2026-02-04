@@ -126,6 +126,18 @@ export class SfxManager {
     this.noise(0.2, 0.1, 800);
   }
 
+  /** Silly fart sound for collisions in silly mode. */
+  impactFart(): void {
+    // Low rumbling base
+    this.tone(60, 0.25, 0.3, 'sawtooth', 0.01);
+    // Pitch sweep down (the classic fart sound)
+    this.tone(120, 0.15, 0.2, 'sawtooth', 0.005);
+    this.tone(80, 0.2, 0.25, 'sawtooth', 0.01, 0.08);
+    this.tone(50, 0.15, 0.2, 'sawtooth', 0.01, 0.15);
+    // Noise burst for texture
+    this.noise(0.15, 0.08, 400);
+  }
+
   /** Gentle descending two-note for wrong answer. */
   error(): void {
     this.tone(400, 0.12, 0.08, 'sine', 0.01);

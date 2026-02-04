@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { DPR, FONT_FAMILY, COLOR_STRINGS, COLORS, GAME_WIDTH } from '../config';
 import { runtimeConfig } from '../RuntimeConfig';
 
-type Difficulty = 'short' | 'medium' | 'long';
+type Difficulty = 'short' | 'medium' | 'long' | 'hard' | 'silly';
 
 interface DifficultyOption {
   label: string;
@@ -12,9 +12,11 @@ interface DifficultyOption {
 }
 
 const DIFFICULTY_OPTIONS: Record<Difficulty, DifficultyOption> = {
-  short:  { label: 'Short',  hint: 'cat, dog, sun',    min: 1, max: 2 },
-  medium: { label: 'Medium', hint: 'jump, ship, look',  min: 2, max: 4 },
+  short:  { label: 'Short',  hint: 'cat, dog, sun',       min: 1, max: 2 },
+  medium: { label: 'Medium', hint: 'jump, ship, look',    min: 2, max: 4 },
   long:   { label: 'Long',   hint: 'brave, ocean, dream', min: 3, max: 5 },
+  hard:   { label: 'Hard',   hint: 'rocket, thunder',     min: 7, max: 9 },
+  silly:  { label: 'Silly',  hint: 'poop, fart, bonk',    min: 6, max: 6 },
 };
 
 const SESSION_MIN = 4;
@@ -83,7 +85,7 @@ export class MainMenuScene extends Phaser.Scene {
 
     // --- Session length section ---
     this.sessionLabel = this.add
-      .text(GAME_WIDTH / 2, 390, `Buildings: ${this.sessionLength}`, {
+      .text(GAME_WIDTH / 2, 435, `Buildings: ${this.sessionLength}`, {
         fontFamily: FONT_FAMILY,
         fontSize: '22px',
         color: COLOR_STRINGS.neutral,
@@ -104,23 +106,35 @@ export class MainMenuScene extends Phaser.Scene {
   }
 
   private createDifficultyButtons(): void {
-    const keys: Difficulty[] = ['short', 'medium', 'long'];
-    const btnWidth = 160;
+    const btnWidth = 150;
     const btnHeight = 44;
     const btnGap = 20;
-    const totalWidth = keys.length * btnWidth + (keys.length - 1) * btnGap;
-    const startX = GAME_WIDTH / 2 - totalWidth / 2 + btnWidth / 2;
-    const btnY = 295;
-    const hintY = 330;
 
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-      const opt = DIFFICULTY_OPTIONS[key];
-      const cx = startX + i * (btnWidth + btnGap);
+    // Row 1: Short, Medium, Long
+    const row1: Difficulty[] = ['short', 'medium', 'long'];
+    const row1Y = 290;
+    const row1HintY = 322;
+    const row1Total = row1.length * btnWidth + (row1.length - 1) * btnGap;
+    const row1Start = GAME_WIDTH / 2 - row1Total / 2 + btnWidth / 2;
+
+    // Row 2: Hard, Silly
+    const row2: Difficulty[] = ['hard', 'silly'];
+    const row2Y = 362;
+    const row2HintY = 394;
+    const row2Total = row2.length * btnWidth + (row2.length - 1) * btnGap;
+    const row2Start = GAME_WIDTH / 2 - row2Total / 2 + btnWidth / 2;
+
+    // Build position list for both rows
+    const buttons: { key: Difficulty; cx: number; by: number; hy: number }[] = [];
+    row1.forEach((key, i) => buttons.push({ key, cx: row1Start + i * (btnWidth + btnGap), by: row1Y, hy: row1HintY }));
+    row2.forEach((key, i) => buttons.push({ key, cx: row2Start + i * (btnWidth + btnGap), by: row2Y, hy: row2HintY }));
+
+    for (const pos of buttons) {
+      const opt = DIFFICULTY_OPTIONS[pos.key];
 
       const bg = this.add.graphics();
       const label = this.add
-        .text(cx, btnY, opt.label, {
+        .text(pos.cx, pos.by, opt.label, {
           fontFamily: FONT_FAMILY,
           fontSize: '22px',
           color: COLOR_STRINGS.white,
@@ -129,7 +143,7 @@ export class MainMenuScene extends Phaser.Scene {
         .setOrigin(0.5);
 
       const hint = this.add
-        .text(cx, hintY, opt.hint, {
+        .text(pos.cx, pos.hy, opt.hint, {
           fontFamily: FONT_FAMILY,
           fontSize: '14px',
           color: COLOR_STRINGS.neutral,
@@ -138,9 +152,10 @@ export class MainMenuScene extends Phaser.Scene {
         .setOrigin(0.5);
 
       const zone = this.add
-        .zone(cx, btnY, btnWidth, btnHeight)
+        .zone(pos.cx, pos.by, btnWidth, btnHeight)
         .setInteractive({ useHandCursor: true });
 
+      const key = pos.key;
       zone.on('pointerdown', () => {
         this.selectedDifficulty = key;
         this.refreshDifficultyButtons();
@@ -154,7 +169,7 @@ export class MainMenuScene extends Phaser.Scene {
   }
 
   private refreshDifficultyButtons(): void {
-    const btnWidth = 160;
+    const btnWidth = 150;
     const btnHeight = 44;
 
     for (const btn of this.difficultyButtons) {
@@ -183,7 +198,7 @@ export class MainMenuScene extends Phaser.Scene {
 
   private createSessionStepper(): void {
     const centerX = GAME_WIDTH / 2;
-    const stepperY = 430;
+    const stepperY = 475;
     const arrowSize = 40;
 
     // Left arrow (◀)
@@ -244,7 +259,7 @@ export class MainMenuScene extends Phaser.Scene {
 
     // Draw visual bar
     const barX = GAME_WIDTH / 2 - 80;
-    const barY = 455;
+    const barY = 500;
     const barWidth = 160;
     const barHeight = 10;
     const totalSteps = (SESSION_MAX - SESSION_MIN) / SESSION_STEP;
@@ -264,7 +279,7 @@ export class MainMenuScene extends Phaser.Scene {
 
   private createShowWordToggle(): void {
     const centerX = GAME_WIDTH / 2;
-    const toggleY = 490;
+    const toggleY = 535;
     const boxSize = 28;
     const boxX = centerX - 60;
 
@@ -302,7 +317,7 @@ export class MainMenuScene extends Phaser.Scene {
 
   private refreshShowWordToggle(): void {
     const centerX = GAME_WIDTH / 2;
-    const toggleY = 490;
+    const toggleY = 535;
     const boxSize = 28;
     const boxX = centerX - 60;
 
@@ -328,7 +343,7 @@ export class MainMenuScene extends Phaser.Scene {
     const buttonWidth = 220;
     const buttonHeight = 70;
     const buttonX = GAME_WIDTH / 2;
-    const buttonY = 560;
+    const buttonY = 605;
 
     const buttonBg = this.add.graphics();
     buttonBg.fillStyle(COLORS.secondary, 1);
@@ -388,5 +403,6 @@ export class MainMenuScene extends Phaser.Scene {
     runtimeConfig.difficultyMax = opt.max;
     runtimeConfig.sessionLength = this.sessionLength;
     runtimeConfig.showWord = this.showWordEnabled;
+    runtimeConfig.isSillyMode = this.selectedDifficulty === 'silly';
   }
 }

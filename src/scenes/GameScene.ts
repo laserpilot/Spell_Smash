@@ -66,6 +66,15 @@ export class GameScene extends Phaser.Scene {
   private sweepAngle = 20;
   private sfx!: SfxManager;
 
+  // Progress bar
+  private progressBarBg!: Phaser.GameObjects.Graphics;
+  private progressBarFill!: Phaser.GameObjects.Graphics;
+  private progressLabel!: Phaser.GameObjects.Text;
+
+  // Slow-mo effect
+  private slowMoTriggered = false;
+  private slowMoActive = false;
+
   constructor() {
     super({ key: 'GameScene' });
   }
@@ -224,6 +233,9 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0, 0.5)
       .setDepth(10);
 
+    // Progress bar
+    this.createProgressBar();
+
     // Hear Again button
     this.hearAgainBtn = this.createHearAgainButton();
 
@@ -241,6 +253,9 @@ export class GameScene extends Phaser.Scene {
     this.buildingLabel.setScrollFactor(0);
     this.streakLabel.setScrollFactor(0);
     this.streakCountText.setScrollFactor(0);
+    this.progressBarBg.setScrollFactor(0);
+    this.progressBarFill.setScrollFactor(0);
+    this.progressLabel.setScrollFactor(0);
     this.hearAgainBtn.setScrollFactor(0);
     this.restartBtn.setScrollFactor(0);
 
@@ -397,6 +412,231 @@ export class GameScene extends Phaser.Scene {
 
     gfx.lineStyle(2, outline, 0.35);
     gfx.strokeRoundedRect(x + 1, y + 1, width - 2, height - 2, radius);
+  }
+
+  private createProgressBar(): void {
+    const barWidth = 200;
+    const barHeight = 16;
+    const barX = GAME_WIDTH / 2 - barWidth / 2;
+    const barY = 22;
+
+    // Background
+    this.progressBarBg = this.add.graphics().setDepth(10);
+    this.progressBarBg.fillStyle(COLORS.neutral, 0.15);
+    this.progressBarBg.fillRoundedRect(barX, barY, barWidth, barHeight, 8);
+    this.progressBarBg.lineStyle(1, COLORS.neutral, 0.3);
+    this.progressBarBg.strokeRoundedRect(barX, barY, barWidth, barHeight, 8);
+
+    // Fill (redrawn dynamically)
+    this.progressBarFill = this.add.graphics().setDepth(11);
+
+    // Label below bar
+    this.progressLabel = this.add
+      .text(GAME_WIDTH / 2, 52, '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '16px',
+        color: COLOR_STRINGS.neutral,
+        resolution: DPR,
+      })
+      .setOrigin(0.5)
+      .setDepth(10);
+  }
+
+  private updateProgressBar(): void {
+    const barWidth = 200;
+    const barHeight = 16;
+    const barX = GAME_WIDTH / 2 - barWidth / 2;
+    const barY = 22;
+    const session = runtimeConfig.sessionLength;
+    const completed = this.gameState.currentBuildingIndex;
+
+    // Calculate  fill width
+    const progress = session > 0 ? completed / session : 0;
+    const fillWidth = Math.max(0, barWidth * progress);
+
+    // Redraw fill
+    this.progressBarFill.clear();
+    if (fillWidth > 0) {
+      this.progressBarFill.fillStyle(COLORS.secondary, 1);
+      this.progressBarFill.fillRoundedRect(barX, barY, fillWidth, barHeight, 8);
+    }
+
+    // Update label
+    this.progressLabel.setText(`${completed} of ${session}`);
+
+    // Subtle pulse when progress increases
+    if (completed > 0) {
+      this.tweens.add({
+        targets: this.progressBarFill,
+        scaleX: 1.02,
+        scaleY: 1.1,
+        duration: 100,
+        yoyo: true,
+        ease: 'Sine.easeOut',
+      });
+    }
+  }
+
+  /** Check building milestones (halfway, almost done). Call after advanceBuilding(). */
+  private checkMilestones(): void {
+    const session = runtimeConfig.sessionLength;
+    const current = this.gameState.currentBuildingIndex;
+
+    const halfway = Math.floor(session / 2);
+    if (current === halfway && session >= 4) {
+      this.showMilestoneCelebration('Halfway there!', 'medium');
+    } else if (current === session - 1 && session >= 4) {
+      this.showMilestoneCelebration('Almost done!', 'small');
+    }
+  }
+
+  /** Check streak milestones (5, 10). Call after streak update. */
+  private checkStreakMilestones(): void {
+    const gs = this.gameState;
+
+    if (gs.streak === 5 && !gs.milestoneStreakFive) {
+      gs.milestoneStreakFive = true;
+      this.showMilestoneCelebration('5 in a row!', 'streak');
+    } else if (gs.streak === 10 && !gs.milestoneStreakTen) {
+      gs.milestoneStreakTen = true;
+      this.showMilestoneCelebration('10 in a row!', 'streak_big');
+    }
+  }
+
+  /** Display milestone celebration text and effects. */
+  private showMilestoneCelebration(
+    message: string,
+    type: 'small' | 'medium' | 'streak' | 'streak_big'
+  ): void {
+    const isStreak = type.startsWith('streak');
+    const isBig = type === 'streak_big';
+
+    // Celebratory text
+    const celebText = this.add
+      .text(GAME_WIDTH / 2, 120, message, {
+        fontFamily: FONT_FAMILY,
+        fontSize: isBig ? '48px' : '36px',
+        color: isStreak ? '#FFD700' : COLOR_STRINGS.support,
+        resolution: DPR,
+      })
+      .setOrigin(0.5)
+      .setDepth(30)
+      .setScrollFactor(0)
+      .setScale(0);
+
+    // Bounce-in animation
+    this.tweens.add({
+      targets: celebText,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 300,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(800, () => {
+          this.tweens.add({
+            targets: celebText,
+            alpha: 0,
+            y: celebText.y - 30,
+            duration: 400,
+            onComplete: () => celebText.destroy(),
+          });
+        });
+      },
+    });
+
+    // Confetti effects based on type
+    if (type === 'medium') {
+      for (let i = 0; i < 3; i++) {
+        this.time.delayedCall(i * 80, () => {
+          this.confettiEmitter.emitParticleAt(
+            GAME_WIDTH / 2 + (i - 1) * 150,
+            100,
+            8
+          );
+        });
+      }
+    } else if (type === 'small') {
+      this.confettiEmitter.emitParticleAt(GAME_WIDTH / 2, 100, 5);
+    } else if (type === 'streak') {
+      this.confettiEmitter.emitParticleAt(60, 50, 10);
+    } else if (type === 'streak_big') {
+      for (let i = 0; i < 3; i++) {
+        this.time.delayedCall(i * 100, () => {
+          this.confettiEmitter.emitParticleAt(60 + i * 20, 50, 8);
+        });
+      }
+      this.cameras.main.flash(150, 255, 215, 0);
+    }
+
+    // Play milestone SFX
+    this.sfx.thresholdCross();
+  }
+
+  /** Check if slow-mo should trigger based on projectile position. */
+  private checkSlowMoTrigger(): void {
+    if (this.slowMoTriggered || this.slowMoActive) return;
+    if (this.gameState.phase !== GamePhase.WatchingImpact) return;
+    if (!this.activeProjectile) return;
+    if (!this.activeProjectile.isOnFire && !this.activeProjectile.isSuper) return;
+
+    // Check if any letter crossed the threshold (approaching building)
+    const positions = this.activeProjectile.getLetterPositions();
+    const threshold = 450;
+    const crossed = positions.some((p) => p.x > threshold);
+
+    if (crossed) {
+      this.slowMoTriggered = true;
+      this.enterSlowMo();
+    }
+  }
+
+  /** Start slow-motion effect. */
+  private enterSlowMo(): void {
+    this.slowMoActive = true;
+
+    // Slow down Phaser time (affects timers, tweens)
+    this.tweens.add({
+      targets: this.time,
+      timeScale: 0.3,
+      duration: 500,
+      ease: 'Sine.easeOut',
+    });
+
+    // Slow down Matter.js physics
+    this.tweens.add({
+      targets: this.matter.world.engine.timing,
+      timeScale: 0.3,
+      duration: 500,
+      ease: 'Sine.easeOut',
+    });
+
+    // Zoom camera in slightly
+    this.cameras.main.zoomTo(DPR * 1.05, 200, 'Sine.easeOut');
+  }
+
+  /** Return to normal time. */
+  private exitSlowMo(): void {
+    if (!this.slowMoActive) return;
+    this.slowMoActive = false;
+
+    // Restore time scale
+    this.tweens.add({
+      targets: this.time,
+      timeScale: 1,
+      duration: 200,
+      ease: 'Sine.easeInOut',
+    });
+
+    // Restore physics time scale
+    this.tweens.add({
+      targets: this.matter.world.engine.timing,
+      timeScale: 1,
+      duration: 200,
+      ease: 'Sine.easeInOut',
+    });
+
+    // Zoom camera back
+    this.cameras.main.zoomTo(DPR, 250, 'Sine.easeInOut');
   }
 
   private getLaunchPadLeft(): number {
@@ -684,6 +924,7 @@ export class GameScene extends Phaser.Scene {
     this.buildingLabel.setText(
       `Building ${this.gameState.currentBuildingIndex + 1}`
     );
+    this.updateProgressBar();
 
     this.presentNextWord();
   }
@@ -700,6 +941,7 @@ export class GameScene extends Phaser.Scene {
     this.impactHandled = false;
     this.wrongAttempts = 0;
     this.usedBackspace = false;
+    this.slowMoTriggered = false;
 
     // Create empty projectile on the launch pad (letters added per-keystroke)
     if (this.activeProjectile) {
@@ -787,6 +1029,7 @@ export class GameScene extends Phaser.Scene {
         this.gameState.resetStreak();
       }
       this.updateStreakDisplay();
+      this.checkStreakMilestones();
 
       this.inputManager.disable();
       this.inputManager.clear();
@@ -948,6 +1191,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleMiss(): void {
+    this.exitSlowMo();
     // Word missed the building — clean up and move on
     if (this.activeProjectile) {
       this.retireProjectile(this.activeProjectile);
@@ -986,6 +1230,10 @@ export class GameScene extends Phaser.Scene {
 
   private handleImpact(impactX: number, impactY: number): void {
     this.hasHadImpact = true;
+    // Delay slow-mo exit to let player see impact in slow motion
+    this.time.delayedCall(500, () => {
+      this.exitSlowMo();
+    });
     if (this.building) {
       this.building.releaseBlocks();
     }
@@ -1001,7 +1249,9 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Impact SFX
-    if (isSuper || isOnFire) {
+    if (runtimeConfig.isSillyMode) {
+      this.sfx.impactFart();
+    } else if (isSuper || isOnFire) {
       this.sfx.impactBig();
     } else {
       this.sfx.impactSmall();
@@ -1074,6 +1324,8 @@ export class GameScene extends Phaser.Scene {
 
     this.gameState.phase = GamePhase.LevelComplete;
     this.gameState.advanceBuilding();
+    this.updateProgressBar();
+    this.checkMilestones();
 
     if (this.gameState.hasMoreBuildings()) {
       // Modest fanfare for intermediate buildings
@@ -1272,6 +1524,9 @@ export class GameScene extends Phaser.Scene {
     if (this.wordDisplayShadow) this.wordDisplayShadow.setVisible(false);
     this.feedbackText.setVisible(false);
     this.hintText.setVisible(false);
+    this.progressBarBg.setVisible(false);
+    this.progressBarFill.setVisible(false);
+    this.progressLabel.setVisible(false);
 
     // Panel dimensions
     const panelW = 500;
@@ -1486,6 +1741,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.activeProjectile) {
       this.activeProjectile.update();
+      this.checkSlowMoTrigger();
 
       // Trail particles while letters are in flight
       if (this.gameState.phase === GamePhase.WatchingImpact) {

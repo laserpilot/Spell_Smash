@@ -15,6 +15,7 @@ interface RuntimeConfigShape {
   difficultyMax: number;
   sessionLength: number;
   showWord: boolean;
+  isSillyMode: boolean;
 }
 
 const DEFAULTS: RuntimeConfigShape = {
@@ -32,6 +33,7 @@ const DEFAULTS: RuntimeConfigShape = {
   difficultyMax: 2,   // Short=2, Medium=4, Long=5
   sessionLength: 8,   // 4-24, step by 2
   showWord: true,     // false = audio-only mode
+  isSillyMode: false, // true = silly words + fart sounds
 };
 
 export const runtimeConfig: RuntimeConfigShape = { ...DEFAULTS };
