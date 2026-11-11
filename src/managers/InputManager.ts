@@ -117,7 +117,11 @@ export class InputManager {
   private handleNativeInput = (): void => {
     if (!this.enabled) return;
 
-    const filtered = this.hiddenInput.value.toLowerCase().replace(/[^a-z]/g, '');
+    // Letters and apostrophes (for contractions). Phones type curly ’ quotes.
+    const filtered = this.hiddenInput.value
+      .toLowerCase()
+      .replace(/[\u2018\u2019`]/g, "'")
+      .replace(/[^a-z']/g, '');
 
     if (filtered.length > this.currentText.length) {
       for (let i = this.currentText.length; i < filtered.length; i++) {
@@ -136,7 +140,7 @@ export class InputManager {
       }
     }
 
-    // Keep hidden input in sync (strip non-alpha chars)
+    // Keep hidden input in sync (strip anything we filtered out)
     this.hiddenInput.value = this.currentText;
   };
 
@@ -170,8 +174,8 @@ export class InputManager {
         if (this.onBackspace) this.onBackspace();
         if (this.onKeyDeleted) this.onKeyDeleted(removedIndex);
       }
-    } else if (event.key.length === 1 && /^[a-zA-Z]$/.test(event.key)) {
-      const key = event.key.toLowerCase();
+    } else if (event.key.length === 1 && /^[a-zA-Z'\u2019]$/.test(event.key)) {
+      const key = event.key === '\u2019' ? "'" : event.key.toLowerCase();
       this.currentText += key;
       this.updateDisplay();
       if (this.onKeyTyped) this.onKeyTyped(key, this.currentText.length - 1);

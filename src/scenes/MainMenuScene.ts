@@ -1,18 +1,20 @@
 import Phaser from 'phaser';
 import { DPR, FONT_FAMILY, COLOR_STRINGS, COLORS, GAME_WIDTH, LAYOUT } from '../config';
-import { runtimeConfig } from '../RuntimeConfig';
+import { runtimeConfig, WordMode } from '../RuntimeConfig';
+import { THIS_WEEK } from '../words/weekly';
 import { Scenery } from '../art/Scenery';
 import { drawBeveledPanel, shade } from '../art/draw';
 import { getTheme } from '../art/palette';
 import { blockTexture, roofTexture } from '../art/textures';
 
-type Difficulty = 'short' | 'medium' | 'long' | 'hard' | 'silly';
+type Difficulty = 'short' | 'medium' | 'long' | 'hard' | 'silly' | 'suffixes' | 'weekly';
 
 interface DifficultyOption {
   label: string;
   hint: string;
   min: number;
   max: number;
+  mode?: WordMode;
 }
 
 const DIFFICULTY_OPTIONS: Record<Difficulty, DifficultyOption> = {
@@ -21,7 +23,20 @@ const DIFFICULTY_OPTIONS: Record<Difficulty, DifficultyOption> = {
   long:   { label: 'Long',   hint: 'brave, ocean, dream', min: 3, max: 5 },
   hard:   { label: 'Hard',   hint: 'rocket, thunder',     min: 7, max: 9 },
   silly:  { label: 'Silly',  hint: 'poop, fart, bonk',    min: 6, max: 6 },
+  // Fill-in-the-blank sentence modes
+  suffixes: { label: 'Suffixes', hint: 'hopping, cried', min: 1, max: 1, mode: 'suffixes' },
+  weekly: {
+    label: 'This Week',
+    hint: THIS_WEEK.words.slice(0, 2).map((w) => w.word).join(', '),
+    min: 1,
+    max: 1,
+    mode: 'weekly',
+  },
 };
+
+const BUTTON_W = 124;
+const BUTTON_H = 44;
+const BUTTON_GAP = 12;
 
 const SESSION_MIN = 4;
 const SESSION_MAX = 24;
@@ -44,6 +59,7 @@ export class MainMenuScene extends Phaser.Scene {
   private sessionBarGraphics!: Phaser.GameObjects.Graphics;
   private checkboxGfx!: Phaser.GameObjects.Graphics;
   private checkmarkText!: Phaser.GameObjects.Text;
+  private showWordObjects: (Phaser.GameObjects.Graphics | Phaser.GameObjects.Text)[] = [];
   private scenery!: Scenery;
 
   constructor() {
@@ -94,7 +110,7 @@ export class MainMenuScene extends Phaser.Scene {
 
     // --- Difficulty section ---
     this.add
-      .text(GAME_WIDTH / 2, 255, 'Word Difficulty', {
+      .text(GAME_WIDTH / 2, 255, 'Words', {
         fontFamily: FONT_FAMILY,
         fontSize: '22px',
         color: COLOR_STRINGS.neutral,
@@ -127,28 +143,20 @@ export class MainMenuScene extends Phaser.Scene {
   }
 
   private createDifficultyButtons(): void {
-    const btnWidth = 150;
-    const btnHeight = 44;
-    const btnGap = 20;
+    // Row 1: see-and-hear word lists. Row 2: silly words and sentence modes.
+    const rows: { keys: Difficulty[]; y: number }[] = [
+      { keys: ['short', 'medium', 'long', 'hard'], y: 290 },
+      { keys: ['silly', 'suffixes', 'weekly'], y: 362 },
+    ];
 
-    // Row 1: Short, Medium, Long
-    const row1: Difficulty[] = ['short', 'medium', 'long'];
-    const row1Y = 290;
-    const row1HintY = 322;
-    const row1Total = row1.length * btnWidth + (row1.length - 1) * btnGap;
-    const row1Start = GAME_WIDTH / 2 - row1Total / 2 + btnWidth / 2;
-
-    // Row 2: Hard, Silly
-    const row2: Difficulty[] = ['hard', 'silly'];
-    const row2Y = 362;
-    const row2HintY = 394;
-    const row2Total = row2.length * btnWidth + (row2.length - 1) * btnGap;
-    const row2Start = GAME_WIDTH / 2 - row2Total / 2 + btnWidth / 2;
-
-    // Build position list for both rows
     const buttons: { key: Difficulty; cx: number; by: number; hy: number }[] = [];
-    row1.forEach((key, i) => buttons.push({ key, cx: row1Start + i * (btnWidth + btnGap), by: row1Y, hy: row1HintY }));
-    row2.forEach((key, i) => buttons.push({ key, cx: row2Start + i * (btnWidth + btnGap), by: row2Y, hy: row2HintY }));
+    for (const row of rows) {
+      const total = row.keys.length * BUTTON_W + (row.keys.length - 1) * BUTTON_GAP;
+      const start = GAME_WIDTH / 2 - total / 2 + BUTTON_W / 2;
+      row.keys.forEach((key, i) =>
+        buttons.push({ key, cx: start + i * (BUTTON_W + BUTTON_GAP), by: row.y, hy: row.y + 32 })
+      );
+    }
 
     for (const pos of buttons) {
       const opt = DIFFICULTY_OPTIONS[pos.key];
@@ -157,7 +165,7 @@ export class MainMenuScene extends Phaser.Scene {
       const label = this.add
         .text(pos.cx, pos.by, opt.label, {
           fontFamily: FONT_FAMILY,
-          fontSize: '22px',
+          fontSize: '21px',
           color: COLOR_STRINGS.white,
           resolution: DPR,
         })
@@ -173,13 +181,14 @@ export class MainMenuScene extends Phaser.Scene {
         .setOrigin(0.5);
 
       const zone = this.add
-        .zone(pos.cx, pos.by, btnWidth, btnHeight)
+        .zone(pos.cx, pos.by, BUTTON_W, BUTTON_H)
         .setInteractive({ useHandCursor: true });
 
       const key = pos.key;
       zone.on('pointerdown', () => {
         this.selectedDifficulty = key;
         this.refreshDifficultyButtons();
+        this.refreshShowWordToggle();
         this.applySettings();
       });
 
@@ -190,8 +199,8 @@ export class MainMenuScene extends Phaser.Scene {
   }
 
   private refreshDifficultyButtons(): void {
-    const btnWidth = 150;
-    const btnHeight = 44;
+    const btnWidth = BUTTON_W;
+    const btnHeight = BUTTON_H;
 
     for (const btn of this.difficultyButtons) {
       const isSelected = btn.key === this.selectedDifficulty;
@@ -314,7 +323,7 @@ export class MainMenuScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    this.add
+    const toggleLabel = this.add
       .text(boxX + 24, toggleY, 'Show Word', {
         fontFamily: FONT_FAMILY,
         fontSize: '20px',
@@ -322,6 +331,8 @@ export class MainMenuScene extends Phaser.Scene {
         resolution: DPR,
       })
       .setOrigin(0, 0.5);
+
+    this.showWordObjects = [this.checkboxGfx, this.checkmarkText, toggleLabel];
 
     const zone = this.add
       .zone(centerX, toggleY, 180, boxSize + 8)
@@ -341,6 +352,10 @@ export class MainMenuScene extends Phaser.Scene {
     const toggleY = 535;
     const boxSize = 28;
     const boxX = centerX - 60;
+
+    // Sentence modes never flash the word, so the toggle doesn't apply
+    const applies = !DIFFICULTY_OPTIONS[this.selectedDifficulty].mode;
+    for (const obj of this.showWordObjects) obj.setAlpha(applies ? 1 : 0.35);
 
     this.checkboxGfx.clear();
     if (this.showWordEnabled) {
@@ -425,5 +440,6 @@ export class MainMenuScene extends Phaser.Scene {
     runtimeConfig.sessionLength = this.sessionLength;
     runtimeConfig.showWord = this.showWordEnabled;
     runtimeConfig.isSillyMode = this.selectedDifficulty === 'silly';
+    runtimeConfig.wordMode = opt.mode ?? 'classic';
   }
 }

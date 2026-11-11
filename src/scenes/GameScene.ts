@@ -23,6 +23,9 @@ import { SfxManager } from '../managers/SfxManager';
 import { Scenery } from '../art/Scenery';
 import { drawBeveledPanel } from '../art/draw';
 import { SCENE } from '../art/palette';
+import { SentencePanel } from '../objects/SentencePanel';
+import { SentenceDeck } from '../words/SentenceDeck';
+import { BLANK, SentenceWord } from '../words/types';
 
 /** How far the threshold line reaches left/right of the building center. */
 const THRESHOLD_LINE = { left: 190, right: 150 };
@@ -43,6 +46,10 @@ export class GameScene extends Phaser.Scene {
   private wordDisplayShadow!: Phaser.GameObjects.Graphics;
   private launchPadShadow!: Phaser.GameObjects.Graphics;
   private feedbackText!: Phaser.GameObjects.Text;
+  // Sentence modes (null deck = classic see-and-hear mode)
+  private sentencePanel!: SentencePanel;
+  private sentenceDeck: SentenceDeck | null = null;
+  private currentEntry: SentenceWord | null = null;
   private hintText!: Phaser.GameObjects.Text;
   private buildingLabel!: Phaser.GameObjects.Text;
   private streakLabel!: Phaser.GameObjects.Text;
@@ -127,6 +134,9 @@ export class GameScene extends Phaser.Scene {
     // Managers
     this.gameState = new GameStateManager();
     this.wordManager = new WordManager();
+    this.sentenceDeck =
+      runtimeConfig.wordMode === 'classic' ? null : new SentenceDeck(runtimeConfig.wordMode);
+    this.currentEntry = null;
     this.inputManager = new InputManager(this);
     this.inputManager.onSubmit = this.handleSubmit.bind(this);
     this.inputManager.onBackspace = () => {
@@ -188,6 +198,9 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(10);
+
+    // Sentence card (sentence modes only; sits where the word display is)
+    this.sentencePanel = new SentencePanel(this, LAYOUT.wordDisplayX, 240);
 
     // Feedback text
     this.feedbackText = this.add
@@ -270,6 +283,7 @@ export class GameScene extends Phaser.Scene {
       this.wordDisplayText,
       this.feedbackText,
       this.hintText,
+      ...this.sentencePanel.getHudObjects(),
       this.buildingLabel,
       this.streakLabel,
       this.streakCountText,
@@ -938,12 +952,21 @@ export class GameScene extends Phaser.Scene {
     return container;
   }
 
+  /** Say the word; in sentence modes, follow it with the sentence. */
+  private speakPrompt(): void {
+    const entry = this.currentEntry;
+    const text = entry
+      ? `${entry.word}. ${entry.sentence.replace(BLANK, entry.word)}`
+      : this.currentWord;
+    this.audioManager.speakWord(text);
+  }
+
   private handleHearAgain(): void {
     if (this.gameState.phase !== GamePhase.WaitingForInput) return;
 
-    this.audioManager.speakWord(this.currentWord);
+    this.speakPrompt();
 
-    if (runtimeConfig.showWord) {
+    if (runtimeConfig.showWord && !this.sentenceDeck) {
       this.wordDisplayText.setText(this.currentWord);
       this.wordDisplayText.setVisible(true);
       this.wordDisplayText.setAlpha(1);
@@ -1011,7 +1034,17 @@ export class GameScene extends Phaser.Scene {
     const difficulty = this.wordManager.getDifficultyForBuilding(
       this.gameState.currentBuildingIndex
     );
-    this.currentWord = this.wordManager.getNextWord(difficulty);
+    if (this.sentenceDeck) {
+      const { entry, list } = this.sentenceDeck.next(this.gameState.currentBuildingIndex);
+      this.currentEntry = entry;
+      this.currentWord = entry.word;
+      this.sentencePanel.show(entry, list.title);
+      this.wordDisplayBg.setVisible(false);
+      this.wordDisplayShadow.setVisible(false);
+      this.wordDisplayText.setVisible(false);
+    } else {
+      this.currentWord = this.wordManager.getNextWord(difficulty);
+    }
     this.feedbackText.setText('');
     this.hintText.setVisible(false);
     this.hintText.setText('');
@@ -1037,7 +1070,8 @@ export class GameScene extends Phaser.Scene {
     this.inputManager.disable();
     this.inputManager.clear();
 
-    if (runtimeConfig.showWord) {
+    const flashWord = runtimeConfig.showWord && !this.sentenceDeck;
+    if (flashWord) {
       this.wordDisplayText.setText(this.currentWord);
       this.wordDisplayText.setVisible(true);
       this.wordDisplayText.setAlpha(1);
@@ -1056,12 +1090,12 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    this.audioManager.speakWord(this.currentWord);
+    this.speakPrompt();
 
     this.time.delayedCall(2000, () => {
       if (this.gameState.phase !== GamePhase.ShowingWord) return;
 
-      if (runtimeConfig.showWord) {
+      if (flashWord) {
         this.tweens.add({
           targets: [this.wordDisplayText, this.wordDisplayBg, this.wordDisplayShadow],
           alpha: 0,
@@ -1107,6 +1141,11 @@ export class GameScene extends Phaser.Scene {
       }
       this.updateStreakDisplay();
       this.checkStreakMilestones();
+
+      if (this.sentenceDeck && this.currentEntry) {
+        this.sentenceDeck.recordResult(this.currentEntry, this.wrongAttempts);
+        this.sentencePanel.reveal();
+      }
 
       this.inputManager.disable();
       this.inputManager.clear();
@@ -1162,7 +1201,11 @@ export class GameScene extends Phaser.Scene {
         );
       }
 
-      if (this.wrongAttempts >= 1) {
+      if (this.sentenceDeck && this.currentEntry) {
+        // Show how the word is built; after two misses, flash the answer
+        this.sentencePanel.showHint(this.sentenceDeck.tipFor(this.currentEntry));
+        if (this.wrongAttempts >= 2) this.sentencePanel.peek(2500);
+      } else if (this.wrongAttempts >= 1) {
         this.hintText.setText(this.currentWord[0]);
         this.hintText.setVisible(true);
         this.wordDisplayBg.setVisible(true);
@@ -1573,7 +1616,7 @@ export class GameScene extends Phaser.Scene {
           this.hintText.setVisible(false);
           this.inputManager.enable();
           // Re-speak word as reminder after the visual interruption
-          this.audioManager.speakWord(this.currentWord);
+          this.speakPrompt();
         } else {
           this.presentNextWord();
         }
@@ -1593,13 +1636,15 @@ export class GameScene extends Phaser.Scene {
     if (this.wordDisplayShadow) this.wordDisplayShadow.setVisible(false);
     this.feedbackText.setVisible(false);
     this.hintText.setVisible(false);
+    this.sentencePanel.setVisible(false);
     this.progressBarBg.setVisible(false);
     this.progressBarFill.setVisible(false);
     this.progressLabel.setVisible(false);
 
     // Panel dimensions
+    const practice = this.sentenceDeck ? [...this.sentenceDeck.missed] : [];
     const panelW = 500;
-    const panelH = 420;
+    const panelH = practice.length > 0 ? 490 : 420;
     const panelX = GAME_WIDTH / 2 - panelW / 2;
     const panelY = GAME_HEIGHT / 2 - panelH / 2;
 
@@ -1666,6 +1711,19 @@ export class GameScene extends Phaser.Scene {
         resolution: DPR,
       }).setOrigin(1, 0.5);
       statsContainer.add(rowValue);
+    }
+
+    // Words that needed more than one try (sentence modes)
+    if (practice.length > 0) {
+      const practiceText = this.add.text(0, startY + statsData.length * rowH - 5, `Practice: ${practice.join(', ')}`, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '22px',
+        color: COLOR_STRINGS.support,
+        align: 'center',
+        wordWrap: { width: panelW - 80 },
+        resolution: DPR,
+      }).setOrigin(0.5, 0);
+      statsContainer.add(practiceText);
     }
 
     // Play Again button

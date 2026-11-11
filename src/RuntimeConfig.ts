@@ -1,4 +1,8 @@
 import { PHYSICS, LAYOUT, BLOCK } from './config';
+import type { SentenceMode } from './words/SentenceDeck';
+
+/** 'classic' = see/hear the word; the others use fill-in-the-blank sentences. */
+export type WordMode = 'classic' | SentenceMode;
 
 interface RuntimeConfigShape {
   launchAngle: number;
@@ -16,6 +20,7 @@ interface RuntimeConfigShape {
   sessionLength: number;
   showWord: boolean;
   isSillyMode: boolean;
+  wordMode: WordMode;
 }
 
 const DEFAULTS: RuntimeConfigShape = {
@@ -34,6 +39,7 @@ const DEFAULTS: RuntimeConfigShape = {
   sessionLength: 8,   // 4-24, step by 2
   showWord: true,     // false = audio-only mode
   isSillyMode: false, // true = silly words + fart sounds
+  wordMode: 'classic',
 };
 
 export const runtimeConfig: RuntimeConfigShape = { ...DEFAULTS };
