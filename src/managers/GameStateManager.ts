@@ -58,6 +58,7 @@ export class GameStateManager {
       pattern,
       pedestalHeight: LAYOUT.pedestalHeight,
       theme: this.currentBuildingIndex,
+      tough: runtimeConfig.toughBuildings,
     };
   }
 

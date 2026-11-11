@@ -21,6 +21,8 @@ export interface BuildingConfig {
   pedestalHeight: number;
   /** Color theme index (see art/palette.ts). */
   theme: number;
+  /** Mixed materials that crack and break; blocks wake only where hit. */
+  tough: boolean;
 }
 
 export enum GamePhase {

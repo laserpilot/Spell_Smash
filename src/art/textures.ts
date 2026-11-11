@@ -298,3 +298,107 @@ export function pedestalTexture(scene: Phaser.Scene, w: number, h: number): stri
     ctx.fillRect(1, capH - 2.5, tw - 2, 2.5);
   });
 }
+
+/** Glass block: pale see-through pane in a white frame, with a shine streak. */
+export function glassBlockTexture(scene: Phaser.Scene, w: number, h: number): string {
+  const key = `glass-${w}x${h}`;
+  return canvasTexture(scene, key, w, h, (ctx) => {
+    const r = Math.min(4, h / 4);
+    roundRectPath(ctx, 0, 0, w, h, r);
+    ctx.fillStyle = css(0xffffff, 0.95);
+    ctx.fill();
+
+    roundRectPath(ctx, 2.5, 2.5, w - 5, h - 5, Math.max(1, r - 2));
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, css(0xd9f4ff, 0.85));
+    g.addColorStop(1, css(0x8fd3ee, 0.85));
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // Diagonal shine streaks
+    ctx.save();
+    roundRectPath(ctx, 2.5, 2.5, w - 5, h - 5, Math.max(1, r - 2));
+    ctx.clip();
+    ctx.strokeStyle = css(0xffffff, 0.75);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.18, h);
+    ctx.lineTo(w * 0.18 + h, 0);
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.18 + 7, h);
+    ctx.lineTo(w * 0.18 + 7 + h, 0);
+    ctx.stroke();
+    ctx.restore();
+  });
+}
+
+/** Stone block: grey with a bevel and a few speckles. Takes the most hits. */
+export function stoneBlockTexture(scene: Phaser.Scene, w: number, h: number): string {
+  const key = `stone-${w}x${h}`;
+  return canvasTexture(scene, key, w, h, (ctx) => {
+    const r = Math.min(3, h / 4);
+    roundRectPath(ctx, 0, 0, w, h, r);
+    ctx.fillStyle = css(shade(SCENE.stoneDark, 0.8));
+    ctx.fill();
+
+    roundRectPath(ctx, 1, 1, w - 2, h - 3, Math.max(1, r - 1));
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, css(SCENE.stoneLight));
+    g.addColorStop(1, css(SCENE.stone));
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    const rand = seededRandom(w * 31 + h);
+    for (let i = 0; i < Math.round(w / 5); i++) {
+      ctx.fillStyle = css(SCENE.stoneDark, 0.35 + rand() * 0.3);
+      ctx.beginPath();
+      ctx.arc(3 + rand() * (w - 6), 3 + rand() * (h - 7), 0.6 + rand() * 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = css(0xffffff, 0.35);
+    ctx.fillRect(r, 2, w - r * 2, 1.5);
+  });
+}
+
+/** Transparent overlay of cracks; stage 1 = a few, stage 2 = badly cracked. */
+export function crackTexture(scene: Phaser.Scene, w: number, h: number, stage: 1 | 2): string {
+  const key = `crack-${w}x${h}-${stage}`;
+  return canvasTexture(scene, key, w, h, (ctx) => {
+    const rand = seededRandom(w * 7 + h * 13 + stage);
+    ctx.strokeStyle = 'rgba(30,30,40,0.6)';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const cx = w * (0.35 + rand() * 0.3);
+    const cy = h * (0.35 + rand() * 0.3);
+    const branches = stage === 1 ? 3 : 6;
+    for (let i = 0; i < branches; i++) {
+      const angle = (i / branches) * Math.PI * 2 + rand() * 0.8;
+      const len = (stage === 1 ? 0.35 : 0.6) * Math.max(w, h) * (0.6 + rand() * 0.5);
+      ctx.lineWidth = stage === 1 ? 1.1 : 1.4;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      let x = cx;
+      let y = cy;
+      const steps = 3;
+      for (let s = 1; s <= steps; s++) {
+        const a = angle + (rand() - 0.5) * 0.9;
+        x += (Math.cos(a) * len) / steps;
+        y += (Math.sin(a) * len) / steps;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    if (stage === 2) {
+      // A chipped corner
+      ctx.fillStyle = 'rgba(30,30,40,0.35)';
+      ctx.beginPath();
+      ctx.moveTo(w, 0);
+      ctx.lineTo(w - 6 - rand() * 5, 0);
+      ctx.lineTo(w, 5 + rand() * 4);
+      ctx.closePath();
+      ctx.fill();
+    }
+  });
+}

@@ -34,6 +34,14 @@ const DIFFICULTY_OPTIONS: Record<Difficulty, DifficultyOption> = {
   },
 };
 
+interface Toggle {
+  x: number;
+  y: number;
+  box: Phaser.GameObjects.Graphics;
+  check: Phaser.GameObjects.Text;
+  label: Phaser.GameObjects.Text;
+}
+
 const BUTTON_W = 124;
 const BUTTON_H = 44;
 const BUTTON_GAP = 12;
@@ -46,6 +54,7 @@ export class MainMenuScene extends Phaser.Scene {
   private selectedDifficulty: Difficulty = 'short';
   private sessionLength = 8;
   private showWordEnabled = true;
+  private toughEnabled = true;
 
   // UI references for redrawing
   private difficultyButtons: {
@@ -57,9 +66,8 @@ export class MainMenuScene extends Phaser.Scene {
   }[] = [];
   private sessionLabel!: Phaser.GameObjects.Text;
   private sessionBarGraphics!: Phaser.GameObjects.Graphics;
-  private checkboxGfx!: Phaser.GameObjects.Graphics;
-  private checkmarkText!: Phaser.GameObjects.Text;
-  private showWordObjects: (Phaser.GameObjects.Graphics | Phaser.GameObjects.Text)[] = [];
+  private showWordToggle!: Toggle;
+  private toughToggle!: Toggle;
   private scenery!: Scenery;
 
   constructor() {
@@ -133,7 +141,7 @@ export class MainMenuScene extends Phaser.Scene {
     this.createSessionStepper();
 
     // --- Show Word toggle ---
-    this.createShowWordToggle();
+    this.createToggles();
 
     // --- Play button ---
     this.createPlayButton();
@@ -188,7 +196,7 @@ export class MainMenuScene extends Phaser.Scene {
       zone.on('pointerdown', () => {
         this.selectedDifficulty = key;
         this.refreshDifficultyButtons();
-        this.refreshShowWordToggle();
+        this.refreshToggles();
         this.applySettings();
       });
 
@@ -307,24 +315,30 @@ export class MainMenuScene extends Phaser.Scene {
     }
   }
 
-  private createShowWordToggle(): void {
-    const centerX = GAME_WIDTH / 2;
-    const toggleY = 535;
-    const boxSize = 28;
-    const boxX = centerX - 60;
+  /** "Show Word" and "Tough Buildings" checkboxes, side by side. */
+  private createToggles(): void {
+    const y = 535;
+    this.showWordToggle = this.createToggle(GAME_WIDTH / 2 - 190, y, 'Show Word', () => {
+      this.showWordEnabled = !this.showWordEnabled;
+    });
+    this.toughToggle = this.createToggle(GAME_WIDTH / 2 + 30, y, 'Tough Buildings', () => {
+      this.toughEnabled = !this.toughEnabled;
+    });
+    this.refreshToggles();
+  }
 
-    this.checkboxGfx = this.add.graphics();
-    this.checkmarkText = this.add
-      .text(boxX, toggleY, '✓', {
+  private createToggle(x: number, y: number, text: string, onToggle: () => void): Toggle {
+    const box = this.add.graphics();
+    const check = this.add
+      .text(x, y, '✓', {
         fontFamily: FONT_FAMILY,
         fontSize: '20px',
         color: COLOR_STRINGS.white,
         resolution: DPR,
       })
       .setOrigin(0.5);
-
-    const toggleLabel = this.add
-      .text(boxX + 24, toggleY, 'Show Word', {
+    const label = this.add
+      .text(x + 24, y, text, {
         fontFamily: FONT_FAMILY,
         fontSize: '20px',
         color: COLOR_STRINGS.neutral,
@@ -332,47 +346,38 @@ export class MainMenuScene extends Phaser.Scene {
       })
       .setOrigin(0, 0.5);
 
-    this.showWordObjects = [this.checkboxGfx, this.checkmarkText, toggleLabel];
+    const width = label.width + 44;
+    this.add
+      .zone(x - 18 + width / 2, y, width, 36)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => {
+        onToggle();
+        this.refreshToggles();
+        this.applySettings();
+      });
 
-    const zone = this.add
-      .zone(centerX, toggleY, 180, boxSize + 8)
-      .setInteractive({ useHandCursor: true });
-
-    zone.on('pointerdown', () => {
-      this.showWordEnabled = !this.showWordEnabled;
-      this.refreshShowWordToggle();
-      this.applySettings();
-    });
-
-    this.refreshShowWordToggle();
+    return { x, y, box, check, label };
   }
 
-  private refreshShowWordToggle(): void {
-    const centerX = GAME_WIDTH / 2;
-    const toggleY = 535;
-    const boxSize = 28;
-    const boxX = centerX - 60;
+  private refreshToggles(): void {
+    // Sentence modes never flash the word, so Show Word doesn't apply there
+    const showWordApplies = !DIFFICULTY_OPTIONS[this.selectedDifficulty].mode;
+    this.drawToggle(this.showWordToggle, this.showWordEnabled, showWordApplies);
+    this.drawToggle(this.toughToggle, this.toughEnabled, true);
+  }
 
-    // Sentence modes never flash the word, so the toggle doesn't apply
-    const applies = !DIFFICULTY_OPTIONS[this.selectedDifficulty].mode;
-    for (const obj of this.showWordObjects) obj.setAlpha(applies ? 1 : 0.35);
-
-    this.checkboxGfx.clear();
-    if (this.showWordEnabled) {
-      this.checkboxGfx.fillStyle(COLORS.secondary, 1);
-      this.checkboxGfx.fillRoundedRect(
-        boxX - boxSize / 2, toggleY - boxSize / 2,
-        boxSize, boxSize, 6
-      );
-      this.checkmarkText.setVisible(true);
+  private drawToggle(t: Toggle, on: boolean, enabled: boolean): void {
+    const size = 28;
+    t.box.clear();
+    if (on) {
+      t.box.fillStyle(COLORS.secondary, 1);
+      t.box.fillRoundedRect(t.x - size / 2, t.y - size / 2, size, size, 6);
     } else {
-      this.checkboxGfx.lineStyle(2, COLORS.neutral, 0.5);
-      this.checkboxGfx.strokeRoundedRect(
-        boxX - boxSize / 2, toggleY - boxSize / 2,
-        boxSize, boxSize, 6
-      );
-      this.checkmarkText.setVisible(false);
+      t.box.lineStyle(2, COLORS.neutral, 0.5);
+      t.box.strokeRoundedRect(t.x - size / 2, t.y - size / 2, size, size, 6);
     }
+    t.check.setVisible(on);
+    for (const obj of [t.box, t.check, t.label]) obj.setAlpha(enabled ? 1 : 0.35);
   }
 
   private createPlayButton(): void {
@@ -439,6 +444,7 @@ export class MainMenuScene extends Phaser.Scene {
     runtimeConfig.difficultyMax = opt.max;
     runtimeConfig.sessionLength = this.sessionLength;
     runtimeConfig.showWord = this.showWordEnabled;
+    runtimeConfig.toughBuildings = this.toughEnabled;
     runtimeConfig.isSillyMode = this.selectedDifficulty === 'silly';
     runtimeConfig.wordMode = opt.mode ?? 'classic';
   }

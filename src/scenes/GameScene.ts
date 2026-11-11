@@ -12,7 +12,7 @@ import {
 import { GamePhase } from '../types';
 import { runtimeConfig } from '../RuntimeConfig';
 import { Ground } from '../objects/Ground';
-import { Building } from '../objects/Building';
+import { Building, BLOCK_BROKEN_EVENT, BlockBrokenInfo } from '../objects/Building';
 import { WordProjectile } from '../objects/WordProjectile';
 import { WordManager } from '../managers/WordManager';
 import { InputManager } from '../managers/InputManager';
@@ -26,9 +26,14 @@ import { SCENE } from '../art/palette';
 import { SentencePanel } from '../objects/SentencePanel';
 import { SentenceDeck } from '../words/SentenceDeck';
 import { BLANK, SentenceWord } from '../words/types';
+import { solveLaunchAngle } from '../physics/aim';
 
 /** How far the threshold line reaches left/right of the building center. */
 const THRESHOLD_LINE = { left: 190, right: 150 };
+
+/** Tough buildings: share of the building to smash before the rest collapses. */
+const SMASH_GOAL = 0.55;
+const SMASH_METER = { x: LAYOUT.buildingX, y: 140, w: 230, h: 26 };
 
 export class GameScene extends Phaser.Scene {
   private ground!: Ground;
@@ -72,6 +77,14 @@ export class GameScene extends Phaser.Scene {
   private percentText!: Phaser.GameObjects.Text;
   private percentTagBg!: Phaser.GameObjects.Graphics;
   private percentTag!: Phaser.GameObjects.Container;
+  // Tough buildings
+  private shardEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private smashMeter!: Phaser.GameObjects.Container;
+  private smashMeterFill!: Phaser.GameObjects.Graphics;
+  private smashShown = 0;
+  /** Tough buildings aim each shot at what's left; the sweep wobbles around it. */
+  private aimTarget: { x: number; y: number } | null = null;
+  private aimAngles = new Map<number, number>();
   private originalBuildingHeight = 0;
   private hasHadImpact = false;
   private thresholdCrossed = false;
@@ -345,6 +358,21 @@ export class GameScene extends Phaser.Scene {
     });
     this.confettiEmitter.setDepth(25);
 
+    // Pieces of a broken block (tinted per block)
+    this.shardEmitter = this.add.particles(0, 0, 'particle', {
+      speed: { min: 60, max: 220 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 1, end: 0.3 },
+      rotate: { min: 0, max: 360 },
+      lifespan: { min: 500, max: 900 },
+      gravityY: 600,
+      emitting: false,
+    });
+    this.shardEmitter.setDepth(15);
+
+    this.smashShown = 0;
+    this.createSmashMeter();
+
     // Threshold line graphic (drawn when building is created)
     this.thresholdLineGfx = this.add.graphics().setDepth(2);
 
@@ -373,8 +401,13 @@ export class GameScene extends Phaser.Scene {
         pairs: { bodyA: MatterJS.BodyType; bodyB: MatterJS.BodyType }[];
       }) => {
         this.onCollision(event);
+        this.building?.handleCollisions(event.pairs);
       }
     );
+    this.events.on(BLOCK_BROKEN_EVENT, this.onBlockBroken, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.events.off(BLOCK_BROKEN_EVENT, this.onBlockBroken, this);
+    });
 
     // Start first building
     this.startNewBuilding();
@@ -766,6 +799,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawThresholdLine(height?: number, centerX?: number): void {
+    // Tough buildings use the smash meter instead of a height line
+    if (runtimeConfig.toughBuildings) return;
     const cx = centerX ?? LAYOUT.buildingX;
     const thresholdHeight = this.getThresholdHeight(height);
     const lineY = LAYOUT.groundY - thresholdHeight;
@@ -817,7 +852,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateDestructionPercent(): void {
-    if (!this.building || !this.hasHadImpact) return;
+    if (!this.building || !this.hasHadImpact || runtimeConfig.toughBuildings) return;
     const currentHeight = this.building.getCurrentHeight();
     // Progress toward win: 0% = full building, 100% = at or below threshold line
     const thresholdH = this.getThresholdHeight();
@@ -1018,6 +1053,7 @@ export class GameScene extends Phaser.Scene {
     this.hasHadImpact = false;
     this.thresholdCrossed = false;
     this.percentTag.setVisible(false);
+    this.resetSmashMeter();
     this.thresholdLineGfx.clear();
     this.drawThresholdLine();
 
@@ -1048,6 +1084,7 @@ export class GameScene extends Phaser.Scene {
     this.feedbackText.setText('');
     this.hintText.setVisible(false);
     this.hintText.setText('');
+    this.pickAimTarget();
     this.impactHandled = false;
     this.wrongAttempts = 0;
     this.usedBackspace = false;
@@ -1164,8 +1201,12 @@ export class GameScene extends Phaser.Scene {
             this.activeProjectile.setOnFire();
           }
         }
-        // Lock the sweep angle at the moment of submission
-        runtimeConfig.launchAngle = this.sweepAngle;
+        // Lock the sweep angle at the moment of submission. Aimed shots
+        // re-solve for the real speed, since fire and super shots fly faster.
+        const power = this.activeProjectile.isSuper ? 1.8 : this.activeProjectile.isOnFire ? 1.5 : 1;
+        runtimeConfig.launchAngle = this.aimTarget
+          ? this.sweepAngle + this.aimAngle(power) - this.aimAngle(1)
+          : this.sweepAngle;
         this.sfx.launch();
         this.activeProjectile.launch();
         this.gameState.phase = GamePhase.WatchingImpact;
@@ -1353,7 +1394,12 @@ export class GameScene extends Phaser.Scene {
       this.exitSlowMo();
     });
     if (this.building) {
-      this.building.releaseBlocks();
+      if (runtimeConfig.toughBuildings) {
+        // Only the spot that was hit comes loose; the rest stays standing
+        this.building.releaseNear(impactX, impactY, 45);
+      } else {
+        this.building.releaseBlocks();
+      }
     }
     let isSuper = false;
     let isOnFire = false;
@@ -1392,7 +1438,9 @@ export class GameScene extends Phaser.Scene {
     // Apply outward force to nearby building blocks for satisfying physics response.
     // Supplements the physical collision (letters persist for 150ms before becoming Rubble).
     const blastRadius = 200;
-    const blastForce = isSuper ? 0.10 : isOnFire ? 0.07 : 0.05;
+    // Tough buildings get a softer push so each hit takes a chunk, not the lot
+    const blastScale = runtimeConfig.toughBuildings ? 0.5 : 1;
+    const blastForce = (isSuper ? 0.10 : isOnFire ? 0.07 : 0.05) * blastScale;
     const MatterBody = (Phaser.Physics.Matter as any).Matter.Body;
     const allBodies = this.matter.world.getAllBodies();
     for (const body of allBodies) {
@@ -1423,6 +1471,12 @@ export class GameScene extends Phaser.Scene {
     )
       return;
 
+    // Tough buildings finish from the update loop once the smash meter fills
+    if (runtimeConfig.toughBuildings) {
+      if (!this.thresholdCrossed) this.presentNextWord();
+      return;
+    }
+
     // Win when remaining height drops below threshold (pedestal + 40% of block height)
     const threshold = this.getThresholdHeight();
     if (this.building.getCurrentHeight() < threshold) {
@@ -1431,6 +1485,165 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.presentNextWord();
     }
+  }
+
+  /**
+   * The building has been beaten. If the player is mid-word, that word
+   * carries over to the next building.
+   */
+  private finishBuilding(): void {
+    if (
+      this.gameState.phase === GamePhase.LevelComplete ||
+      this.gameState.phase === GamePhase.TransitionToNext ||
+      this.gameState.phase === GamePhase.GameComplete
+    )
+      return;
+
+    this.wordCarriedOver =
+      this.gameState.phase === GamePhase.ShowingWord ||
+      this.gameState.phase === GamePhase.WaitingForInput;
+
+    this.inputManager.disable();
+    this.inputManager.clear();
+    // Projectile letters are world-space bodies — destroy before scroll
+    if (this.activeProjectile) {
+      this.activeProjectile.destroy();
+      this.activeProjectile = null;
+    }
+    this.handleBuildingDestroyed();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tough buildings: smash meter, breaking blocks, and the final collapse
+  // ---------------------------------------------------------------------------
+
+  private createSmashMeter(): void {
+    const { x, y, w, h } = SMASH_METER;
+    const bg = this.add.graphics();
+    bg.fillStyle(0x000000, 0.1);
+    bg.fillRoundedRect(-w / 2 + 2, -h / 2 + 3, w, h, h / 2);
+    bg.fillStyle(0xffffff, 0.92);
+    bg.fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
+    bg.fillStyle(COLORS.neutral, 0.15);
+    bg.fillRoundedRect(-w / 2 + 4, -h / 2 + 4, w - 8, h - 8, (h - 8) / 2);
+
+    this.smashMeterFill = this.add.graphics();
+
+    const label = this.add
+      .text(-w / 2 - 10, 0, 'SMASH', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '18px',
+        color: COLOR_STRINGS.support,
+        stroke: '#FFFFFF',
+        strokeThickness: 4,
+        resolution: DPR,
+      })
+      .setOrigin(1, 0.5);
+
+    this.smashMeter = this.add
+      .container(x, y, [bg, this.smashMeterFill, label])
+      .setDepth(12)
+      .setVisible(runtimeConfig.toughBuildings);
+    this.toHud(this.smashMeter);
+    this.drawSmashMeter(0);
+  }
+
+  private drawSmashMeter(progress: number): void {
+    const { w, h } = SMASH_METER;
+    const innerW = w - 8;
+    const fillW = Math.max(0, Math.min(1, progress)) * innerW;
+    this.smashMeterFill.clear();
+    if (fillW < 2) return;
+    const color = progress >= 1 ? COLORS.secondary : COLORS.support;
+    this.smashMeterFill.fillStyle(color, 1);
+    this.smashMeterFill.fillRoundedRect(-w / 2 + 4, -h / 2 + 4, Math.max(fillW, h - 8), h - 8, (h - 8) / 2);
+    this.smashMeterFill.fillStyle(0xffffff, 0.35);
+    this.smashMeterFill.fillRect(-w / 2 + 4 + (h - 8) / 2, -h / 2 + 6, Math.max(0, fillW - (h - 8)), 3);
+  }
+
+  private updateSmashMeter(): void {
+    if (!this.building || !this.hasHadImpact) return;
+    const target = Math.min(1, this.building.getSmashedFraction() / SMASH_GOAL);
+    if (target > this.smashShown + 0.002) {
+      // Ease the bar toward the new value so each hit visibly pumps it up
+      this.smashShown += Math.max(0.004, (target - this.smashShown) * 0.12);
+      this.smashShown = Math.min(this.smashShown, target);
+      this.drawSmashMeter(this.smashShown);
+    }
+    if (target >= 1 && !this.thresholdCrossed) {
+      this.thresholdCrossed = true;
+      this.drawSmashMeter(1);
+      this.collapseBuilding();
+    }
+  }
+
+  private resetSmashMeter(): void {
+    this.smashShown = 0;
+    this.drawSmashMeter(0);
+    this.smashMeter.setVisible(runtimeConfig.toughBuildings);
+  }
+
+  /** Big finish: the rest of the building comes down in slow motion. */
+  private collapseBuilding(): void {
+    this.building.collapse();
+    this.sfx.collapse();
+    this.cameras.main.shake(700, 0.012);
+    for (let i = 0; i < 5; i++) {
+      this.dustEmitter.emitParticleAt(
+        LAYOUT.buildingX + Phaser.Math.Between(-110, 110),
+        LAYOUT.groundY - LAYOUT.pedestalHeight - Phaser.Math.Between(0, 120),
+        8
+      );
+    }
+    this.playThresholdFireworks();
+    this.tweens.add({
+      targets: this.smashMeter,
+      scale: 1.15,
+      duration: 160,
+      yoyo: true,
+      repeat: 1,
+    });
+
+    // A moment of slow motion while it falls
+    this.tweens.add({
+      targets: this.matter.world.engine.timing,
+      timeScale: 0.4,
+      duration: 250,
+      hold: 500,
+      yoyo: true,
+      ease: 'Sine.easeInOut',
+    });
+
+    this.time.delayedCall(1600, () => this.finishBuilding());
+  }
+
+  private pickAimTarget(): void {
+    this.aimTarget = runtimeConfig.toughBuildings ? this.building?.getAimPoint() ?? null : null;
+    this.aimAngles.clear();
+  }
+
+  /** Angle that hits the aim target from the launch pad at the given speed multiplier. */
+  private aimAngle(speedMult: number): number {
+    const cached = this.aimAngles.get(speedMult);
+    if (cached !== undefined) return cached;
+    const t = this.aimTarget!;
+    const angle = solveLaunchAngle(
+      this.getLaunchOriginX(),
+      LAYOUT.launchOriginY,
+      t.x,
+      t.y,
+      runtimeConfig.launchForce * speedMult,
+      LAYOUT.groundY
+    );
+    this.aimAngles.set(speedMult, angle);
+    return angle;
+  }
+
+  private onBlockBroken(info: BlockBrokenInfo): void {
+    this.shardEmitter.setParticleTint(info.color);
+    this.shardEmitter.emitParticleAt(info.x, info.y, info.material === 'glass' ? 12 : 8);
+    this.dustEmitter.emitParticleAt(info.x, info.y, info.material === 'glass' ? 1 : 3);
+    this.sfx.blockBreak(info.material);
   }
 
   private handleBuildingDestroyed(): void {
@@ -1561,6 +1774,7 @@ export class GameScene extends Phaser.Scene {
     this.hasHadImpact = false;
     this.thresholdCrossed = false;
     this.percentTag.setVisible(false);
+    this.resetSmashMeter();
     this.buildingLabel.setText(
       `Building ${this.gameState.currentBuildingIndex + 1}`
     );
@@ -1617,6 +1831,7 @@ export class GameScene extends Phaser.Scene {
           this.inputManager.enable();
           // Re-speak word as reminder after the visual interruption
           this.speakPrompt();
+          this.pickAimTarget();
         } else {
           this.presentNextWord();
         }
@@ -1637,6 +1852,7 @@ export class GameScene extends Phaser.Scene {
     this.feedbackText.setVisible(false);
     this.hintText.setVisible(false);
     this.sentencePanel.setVisible(false);
+    this.smashMeter.setVisible(false);
     this.progressBarBg.setVisible(false);
     this.progressBarFill.setVisible(false);
     this.progressLabel.setVisible(false);
@@ -1821,7 +2037,10 @@ export class GameScene extends Phaser.Scene {
       this.gameState.phase === GamePhase.ShowingWord ||
       this.gameState.phase === GamePhase.WaitingForInput;
     if (sweepPhase) {
-      this.sweepAngle = 15 + 10 * Math.sin(this.time.now * 0.0025);
+      const wobble = Math.sin(this.time.now * 0.0025);
+      this.sweepAngle = this.aimTarget
+        ? this.aimAngle(1) + 2 * wobble
+        : 15 + 10 * wobble;
       runtimeConfig.launchAngle = this.sweepAngle;
     }
     // Only draw the indicator when the player has typed at least one letter
@@ -1841,31 +2060,15 @@ export class GameScene extends Phaser.Scene {
       this.building.update();
       this.updateDestructionPercent();
 
-      // Check if building just crossed below threshold
-      if (this.hasHadImpact && !this.thresholdCrossed) {
+      if (runtimeConfig.toughBuildings) {
+        this.updateSmashMeter();
+      } else if (this.hasHadImpact && !this.thresholdCrossed) {
+        // Check if building just crossed below threshold
         const threshold = this.getThresholdHeight();
         if (this.building.getCurrentHeight() < threshold) {
           this.thresholdCrossed = true;
           this.playThresholdFireworks();
-          // Trigger win if blocks toppled after the 2.5s impact check already ran
-          if (
-            this.gameState.phase !== GamePhase.LevelComplete &&
-            this.gameState.phase !== GamePhase.TransitionToNext
-          ) {
-            // If a word is active, carry it over to the next building
-            this.wordCarriedOver =
-              this.gameState.phase === GamePhase.ShowingWord ||
-              this.gameState.phase === GamePhase.WaitingForInput;
-
-            this.inputManager.disable();
-            this.inputManager.clear();
-            // Projectile letters are world-space bodies — destroy before scroll
-            if (this.activeProjectile) {
-              this.activeProjectile.destroy();
-              this.activeProjectile = null;
-            }
-            this.handleBuildingDestroyed();
-          }
+          this.finishBuilding();
         }
       }
     }

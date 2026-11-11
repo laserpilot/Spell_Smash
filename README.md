@@ -9,7 +9,7 @@ A spelling practice game for early elementary kids. See a word, hear it spoken a
 1. A word appears briefly on screen and is spoken aloud
 2. Type the word from memory in the input box
 3. Press **Enter** or **Space** to launch
-4. Knock the building below the red threshold line to advance
+4. Smash the building to advance (see Tough Buildings below)
 5. Complete all 8 buildings to win
 
 ## Word Modes
@@ -25,6 +25,15 @@ In the sentence modes the word is never flashed. A wrong try shows how the word
 is built (`hop + p + ing`, `prob · a · bly`); a second wrong try shows the answer
 for a moment. Missed words come back a couple of words later and are listed on
 the end screen under **Practice**.
+
+## Tough Buildings
+
+On by default (switch on the menu). Buildings are made of glass (1 hit),
+brick (2 hits) and stone (3 hits), and only the part that gets hit comes
+loose. Blocks crack as they take damage. Each word knocks off a chunk and
+fills the **SMASH** meter; when it's full, the rest of the building comes
+down. Fire and super shots hit harder. With the switch off, the first hit
+releases the whole building and you knock it below the red line, as before.
 
 **Tips:**
 - Click **Hear Again** to replay the word

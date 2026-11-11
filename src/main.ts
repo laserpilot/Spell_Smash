@@ -21,6 +21,9 @@ const config: Phaser.Types.Core.GameConfig = {
     default: 'matter',
     matter: {
       gravity: PHYSICS.gravity,
+      // Extra solver passes keep stacked blocks from jittering and sinking
+      positionIterations: 10,
+      velocityIterations: 8,
       debug: false,
     },
   },

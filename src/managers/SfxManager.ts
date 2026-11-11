@@ -126,6 +126,28 @@ export class SfxManager {
     this.noise(0.2, 0.1, 800);
   }
 
+  /** A block breaking apart. Glass tinkles, brick crunches, stone thuds. */
+  blockBreak(material: 'glass' | 'brick' | 'stone'): void {
+    if (material === 'glass') {
+      this.tone(2300 + Math.random() * 400, 0.12, 0.05, 'triangle', 0.002);
+      this.tone(3400 + Math.random() * 500, 0.1, 0.035, 'triangle', 0.002, 0.04);
+      this.noise(0.08, 0.04, 5000);
+    } else if (material === 'stone') {
+      this.tone(70, 0.18, 0.12, 'sine', 0.004);
+      this.noise(0.14, 0.07, 700);
+    } else {
+      this.tone(140, 0.1, 0.08, 'triangle', 0.004);
+      this.noise(0.1, 0.06, 1400);
+    }
+  }
+
+  /** Long rumble when a whole building comes down. */
+  collapse(): void {
+    this.tone(45, 0.9, 0.2, 'sine', 0.02);
+    this.tone(32, 1.1, 0.1, 'triangle', 0.05);
+    this.noise(0.9, 0.12, 600);
+  }
+
   /** Silly fart sound for collisions in silly mode. */
   impactFart(): void {
     // Low rumbling base

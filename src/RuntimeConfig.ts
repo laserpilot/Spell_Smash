@@ -21,6 +21,7 @@ interface RuntimeConfigShape {
   showWord: boolean;
   isSillyMode: boolean;
   wordMode: WordMode;
+  toughBuildings: boolean;
 }
 
 const DEFAULTS: RuntimeConfigShape = {
@@ -40,6 +41,7 @@ const DEFAULTS: RuntimeConfigShape = {
   showWord: true,     // false = audio-only mode
   isSillyMode: false, // true = silly words + fart sounds
   wordMode: 'classic',
+  toughBuildings: true, // false = original one-hit topple
 };
 
 export const runtimeConfig: RuntimeConfigShape = { ...DEFAULTS };

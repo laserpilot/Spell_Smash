@@ -197,6 +197,19 @@ export class WordProjectile {
       this.scene.matter.world.remove(letter.anchor);
     }
 
+    // Line the letters up on the pad first. A letter still dropping in from
+    // the input box would otherwise yank the chain and send the shot wild.
+    const Body = (Phaser.Physics.Matter as any).Matter.Body;
+    this.letters.forEach((letter, i) => {
+      const body = letter.rect.body;
+      Body.setPosition(body, { x: this.letterX(i, this.letters.length), y: this.originY });
+      Body.setAngle(body, 0);
+      Body.setVelocity(body, { x: 0, y: 0 });
+      Body.setAngularVelocity(body, 0);
+      // Matter carries the pad spring's last push into the next step; drop it
+      Object.assign(body.constraintImpulse, { x: 0, y: 0, angle: 0 });
+    });
+
     // Unlock rotation so letters tumble naturally in flight
     for (const letter of this.letters) {
       const body = letter.rect.body as any;
@@ -213,8 +226,11 @@ export class WordProjectile {
     const baseVel = getLaunchVelocity();
     const vx = baseVel.x * speedMult;
     const vy = baseVel.y * speedMult;
+    // Tough buildings read this to decide how much damage each letter does
+    const shotPower = this.isSuper ? 3 : this.isOnFire ? 2 : 1;
     for (const letter of this.letters) {
       letter.rect.setVelocity(vx, vy);
+      (letter.rect.body as { shotPower?: number }).shotPower = shotPower;
     }
   }
 
