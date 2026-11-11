@@ -19,6 +19,8 @@ export interface BuildingConfig {
   groundY: number;
   pattern: BuildingPattern;
   pedestalHeight: number;
+  /** Color theme index (see art/palette.ts). */
+  theme: number;
 }
 
 export enum GamePhase {

@@ -29,7 +29,8 @@ const config: Phaser.Types.Core.GameConfig = {
 
 const game = new Phaser.Game(config);
 
-game.events.once('ready', () => {
+// Render diagnostics (dev builds only)
+if (import.meta.env.DEV) game.events.once('ready', () => {
   const canvas = game.canvas;
   console.group('=== Sola Render Diagnostics ===');
   console.log('devicePixelRatio:', window.devicePixelRatio);
@@ -42,3 +43,6 @@ game.events.once('ready', () => {
   console.log('Renderer resolution:', (game.renderer as any).config?.resolution ?? 'N/A');
   console.groupEnd();
 });
+
+// Handy for poking at scenes from the browser console during development
+if (import.meta.env.DEV) (window as unknown as { game: Phaser.Game }).game = game;

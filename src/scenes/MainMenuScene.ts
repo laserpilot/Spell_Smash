@@ -1,6 +1,10 @@
 import Phaser from 'phaser';
-import { DPR, FONT_FAMILY, COLOR_STRINGS, COLORS, GAME_WIDTH } from '../config';
+import { DPR, FONT_FAMILY, COLOR_STRINGS, COLORS, GAME_WIDTH, LAYOUT } from '../config';
 import { runtimeConfig } from '../RuntimeConfig';
+import { Scenery } from '../art/Scenery';
+import { drawBeveledPanel, shade } from '../art/draw';
+import { getTheme } from '../art/palette';
+import { blockTexture, roofTexture } from '../art/textures';
 
 type Difficulty = 'short' | 'medium' | 'long' | 'hard' | 'silly';
 
@@ -40,6 +44,7 @@ export class MainMenuScene extends Phaser.Scene {
   private sessionBarGraphics!: Phaser.GameObjects.Graphics;
   private checkboxGfx!: Phaser.GameObjects.Graphics;
   private checkmarkText!: Phaser.GameObjects.Text;
+  private scenery!: Scenery;
 
   constructor() {
     super({ key: 'MainMenuScene' });
@@ -51,22 +56,38 @@ export class MainMenuScene extends Phaser.Scene {
 
     this.cameras.main.setZoom(DPR).setOrigin(0, 0);
 
+    this.scenery = new Scenery(this);
+    this.createToyTower(150, 0, 7);
+    this.createToyTower(1130, 1, 9);
+
+    // Card behind the settings
+    const card = this.add.graphics();
+    card.fillStyle(0x000000, 0.08);
+    card.fillRoundedRect(364, 234, 560, 330, 24);
+    card.fillStyle(0xffffff, 0.86);
+    card.fillRoundedRect(360, 228, 560, 330, 24);
+
     // Title
     this.add
-      .text(GAME_WIDTH / 2, 120, 'Sola\'s Spell Smash', {
+      .text(GAME_WIDTH / 2, 118, 'Sola\'s Spell Smash', {
         fontFamily: FONT_FAMILY,
-        fontSize: '72px',
+        fontSize: '76px',
         color: COLOR_STRINGS.primary,
+        stroke: '#FFFFFF',
+        strokeThickness: 10,
+        shadow: { offsetX: 0, offsetY: 5, color: 'rgba(43,58,103,0.25)', blur: 0, fill: false, stroke: true },
         resolution: DPR,
       })
       .setOrigin(0.5);
 
     // Subtitle
     this.add
-      .text(GAME_WIDTH / 2, 180, 'Spell words. Smash buildings.', {
+      .text(GAME_WIDTH / 2, 182, 'Spell words. Smash buildings.', {
         fontFamily: FONT_FAMILY,
         fontSize: '28px',
-        color: COLOR_STRINGS.neutral,
+        color: COLOR_STRINGS.primary,
+        stroke: '#FFFFFF',
+        strokeThickness: 6,
         resolution: DPR,
       })
       .setOrigin(0.5);
@@ -340,61 +361,61 @@ export class MainMenuScene extends Phaser.Scene {
   }
 
   private createPlayButton(): void {
-    const buttonWidth = 220;
-    const buttonHeight = 70;
-    const buttonX = GAME_WIDTH / 2;
-    const buttonY = 605;
+    const w = 220;
+    const h = 70;
+    const x = GAME_WIDTH / 2;
+    const y = 610;
 
-    const buttonBg = this.add.graphics();
-    buttonBg.fillStyle(COLORS.secondary, 1);
-    buttonBg.fillRoundedRect(
-      buttonX - buttonWidth / 2,
-      buttonY - buttonHeight / 2,
-      buttonWidth,
-      buttonHeight,
-      16
-    );
+    const shadow = this.add.graphics();
+    shadow.fillStyle(0x000000, 0.15);
+    shadow.fillRoundedRect(x - w / 2 + 3, y - h / 2 + 6, w, h, 18);
+
+    const bg = this.add.graphics();
+    const draw = (color: number) => {
+      bg.clear();
+      drawBeveledPanel(bg, x - w / 2, y - h / 2, w, h, color, 1, 18);
+    };
+    draw(COLORS.secondary);
 
     this.add
-      .text(buttonX, buttonY, 'PLAY', {
+      .text(x, y, 'PLAY', {
         fontFamily: FONT_FAMILY,
-        fontSize: '36px',
+        fontSize: '38px',
         color: COLOR_STRINGS.white,
+        shadow: { offsetX: 0, offsetY: 2, color: 'rgba(0,0,0,0.2)', blur: 0, fill: true },
         resolution: DPR,
       })
       .setOrigin(0.5);
 
-    const hitZone = this.add
-      .zone(buttonX, buttonY, buttonWidth, buttonHeight)
-      .setInteractive({ useHandCursor: true });
+    const hitZone = this.add.zone(x, y, w, h).setInteractive({ useHandCursor: true });
+    hitZone.on('pointerover', () => draw(shade(COLORS.secondary, 0.9)));
+    hitZone.on('pointerout', () => draw(COLORS.secondary));
+    hitZone.on('pointerdown', () => this.scene.start('GameScene'));
+  }
 
-    hitZone.on('pointerover', () => {
-      buttonBg.clear();
-      buttonBg.fillStyle(0x52b0a5, 1);
-      buttonBg.fillRoundedRect(
-        buttonX - buttonWidth / 2,
-        buttonY - buttonHeight / 2,
-        buttonWidth,
-        buttonHeight,
-        16
-      );
-    });
+  /** Decorative stack of building blocks standing on the ground. */
+  private createToyTower(cx: number, themeIndex: number, rows: number): void {
+    const theme = getTheme(themeIndex);
+    const bw = 44;
+    const bh = 26;
+    const groundY = LAYOUT.groundY;
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < 2; col++) {
+        const color = theme.blocks[(row + col) % theme.blocks.length];
+        const variant = (row * 3 + col) % 3 === 0 ? 'lit' : 'dark';
+        this.add
+          .image(cx + (col - 0.5) * bw, groundY - bh / 2 - row * bh, blockTexture(this, bw - 2, bh - 2, color, variant))
+          .setDisplaySize(bw - 2, bh - 2);
+      }
+    }
+    this.add
+      .image(cx, groundY - rows * bh - bh / 2, roofTexture(this, bw * 2 - 2, bh + 6, theme.roof))
+      .setDisplaySize(bw * 2 - 2, bh + 6)
+      .setOrigin(0.5, 0.6);
+  }
 
-    hitZone.on('pointerout', () => {
-      buttonBg.clear();
-      buttonBg.fillStyle(COLORS.secondary, 1);
-      buttonBg.fillRoundedRect(
-        buttonX - buttonWidth / 2,
-        buttonY - buttonHeight / 2,
-        buttonWidth,
-        buttonHeight,
-        16
-      );
-    });
-
-    hitZone.on('pointerdown', () => {
-      this.scene.start('GameScene');
-    });
+  update(_time: number, delta: number): void {
+    this.scenery.update(delta);
   }
 
   private applySettings(): void {

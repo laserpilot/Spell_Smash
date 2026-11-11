@@ -57,6 +57,7 @@ export class GameStateManager {
       groundY: LAYOUT.groundY,
       pattern,
       pedestalHeight: LAYOUT.pedestalHeight,
+      theme: this.currentBuildingIndex,
     };
   }
 

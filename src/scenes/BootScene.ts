@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { WebFontFile } from '../WebFontFile';
 import { DPR, FONT_FAMILY, COLOR_STRINGS, GAME_WIDTH, GAME_HEIGHT } from '../config';
+import { createSharedTextures } from '../art/textures';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -22,12 +23,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
-    // Generate a small particle texture for effects
-    const gfx = this.add.graphics();
-    gfx.fillStyle(0xffffff, 1);
-    gfx.fillRect(0, 0, 6, 6);
-    gfx.generateTexture('particle', 6, 6);
-    gfx.destroy();
+    createSharedTextures(this);
 
     this.scene.start('MainMenuScene');
   }

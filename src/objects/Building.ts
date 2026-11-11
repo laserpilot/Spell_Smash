@@ -1,12 +1,35 @@
 import Phaser from 'phaser';
-import { COLORS } from '../config';
 import { BuildingConfig, CollisionCategory } from '../types';
 import { runtimeConfig } from '../RuntimeConfig';
+import { getTheme } from '../art/palette';
+import { blockTexture, roofTexture, pedestalTexture, BlockVariant } from '../art/textures';
 
 interface Block {
   body: MatterJS.BodyType;
-  visual: Phaser.GameObjects.Graphics;
+  visual: Phaser.GameObjects.Image;
 }
+
+/** Planned block position, produced by a layout pattern before any bodies exist. */
+interface BlockSpec {
+  x: number;
+  y: number;
+  /** Width in columns (1 = single block, 2 = double-wide, ...). */
+  span: number;
+  row: number;
+  col: number;
+  roof: boolean;
+}
+
+const MatterBody = (Phaser.Physics.Matter as any).Matter.Body;
+
+const BLOCK_COLLISION = {
+  category: CollisionCategory.BuildingBlock,
+  mask:
+    CollisionCategory.Default |
+    CollisionCategory.WordLetter |
+    CollisionCategory.BuildingBlock |
+    CollisionCategory.Ground,
+};
 
 export class Building {
   private scene: Phaser.Scene;
@@ -14,7 +37,8 @@ export class Building {
   private config: BuildingConfig;
   private effectiveGroundY: number;
   private pedestalBody: MatterJS.BodyType | null = null;
-  private pedestalVisual: Phaser.GameObjects.Rectangle | null = null;
+  private pedestalVisual: Phaser.GameObjects.Image | null = null;
+  private specs: BlockSpec[] = [];
   private totalRows = 0;
   private frozen = false;
 
@@ -23,8 +47,13 @@ export class Building {
     this.config = config;
     this.effectiveGroundY = config.groundY - config.pedestalHeight;
     this.generatePedestal();
-    this.totalRows = this.calculateTotalRows();
-    this.generate();
+
+    // Plan the layout first so the row count is known before blocks are weighted
+    this.layout();
+    this.totalRows = this.specs.reduce((max, s) => Math.max(max, s.row + 1), 0);
+    for (const spec of this.specs) this.createBlock(spec);
+    this.specs = [];
+
     this.freezeBlocks();
   }
 
@@ -32,18 +61,13 @@ export class Building {
     if (this.config.pedestalHeight <= 0) return;
 
     const { x, groundY, pedestalHeight, columns, blockWidth } = this.config;
-    const pedW = columns * blockWidth * 1.5 + 20;
+    const pedW = Math.round(columns * blockWidth * 1.5 + 20);
     const pedH = pedestalHeight;
     const pedY = groundY - pedH / 2;
 
-    this.pedestalVisual = this.scene.add.rectangle(
-      x,
-      pedY,
-      pedW,
-      pedH,
-      COLORS.neutral,
-      0.15
-    );
+    const key = pedestalTexture(this.scene, pedW, pedH);
+    this.pedestalVisual = this.scene.add.image(x, pedY, key);
+    this.pedestalVisual.setDisplaySize(pedW + 10, pedH);
 
     this.pedestalBody = this.scene.matter.add.rectangle(x, pedY, pedW, pedH, {
       isStatic: true,
@@ -58,590 +82,242 @@ export class Building {
     });
   }
 
-  private generate(): void {
+  // ---------------------------------------------------------------------------
+  // Layout patterns. Each one fills `this.specs` with up to totalBlocks blocks.
+  // ---------------------------------------------------------------------------
+
+  private layout(): void {
     switch (this.config.pattern) {
-      case 'pyramid':
-        this.generatePyramid();
-        break;
-      case 'tower':
-        this.generateTower();
-        break;
-      case 'offset':
-        this.generateOffset();
-        break;
-      case 'bridge':
-        this.generateBridge();
-        break;
-      case 'span':
-        this.generateSpan();
-        break;
-      case 'arch':
-        this.generateArch();
-        break;
-      case 'castle':
-        this.generateCastle();
-        break;
-      case 'overhang':
-        this.generateOverhang();
-        break;
-      case 'wall':
-        this.generateWall();
-        break;
+      case 'pyramid': return this.layoutPyramid();
+      case 'tower': return this.layoutTower();
+      case 'offset': return this.layoutOffset();
+      case 'bridge': return this.layoutPillarsWithSpan(0.15, 2);
+      case 'span': return this.layoutPillarsWithSpan(0.12, 3);
+      case 'arch': return this.layoutArch();
+      case 'castle': return this.layoutCastle();
+      case 'overhang': return this.layoutOverhang();
+      case 'wall': return this.layoutWall();
       case 'stack':
       default:
-        this.generateStack();
-        break;
+        return this.layoutStack();
     }
   }
 
-  private generateStack(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
-    let blockCount = 0;
-    let row = 0;
-
-    while (blockCount < totalBlocks) {
-      const useDoubleWide = row < 2; // bottom 2 rows get double-wide blocks
-      let col = 0;
-      while (col < columns && blockCount < totalBlocks) {
-        const canDouble = useDoubleWide && col % 2 === 0 && col + 1 < columns;
-        const bw = canDouble ? blockWidth * 2 : blockWidth;
-        const bx = canDouble
-          ? x + (col + 0.5 - (columns - 1) / 2) * blockWidth
-          : x + (col - (columns - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, bw, blockHeight, row, col);
-        if (canDouble) {
-          blockCount += 2;
-          col += 2;
-        } else {
-          blockCount++;
-          col++;
-        }
-      }
-      row++;
+  /** Full-width rows; the bottom two rows use double-wide blocks. */
+  private layoutStack(): void {
+    const { totalBlocks, columns } = this.config;
+    let count = 0;
+    for (let row = 0; count < totalBlocks; row++) {
+      count += this.fillRow(row, columns, row < 2 ? 2 : 1, totalBlocks - count);
     }
   }
 
-  private generatePyramid(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
-    let blockCount = 0;
+  /** Narrowing rows; restarts at full width when it reaches the top (ziggurat). */
+  private layoutPyramid(): void {
+    const { totalBlocks, columns } = this.config;
+    let count = 0;
     let rowCols = columns;
-    let row = 0;
-
-    while (blockCount < totalBlocks) {
-      for (let col = 0; col < rowCols && blockCount < totalBlocks; col++) {
-        const bx = x + (col - (rowCols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-        blockCount++;
-      }
-      row++;
-      rowCols--;
-      // Cycle back to full width when pyramid narrows to 0 (stepped ziggurat)
-      if (rowCols <= 0) {
-        rowCols = columns;
-      }
+    for (let row = 0; count < totalBlocks; row++) {
+      count += this.fillRow(row, rowCols, 1, totalBlocks - count);
+      rowCols = rowCols > 1 ? rowCols - 1 : columns;
     }
   }
 
-  private generateTower(): void {
-    const { totalBlocks, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
+  /** Two blocks wide, tall. */
+  private layoutTower(): void {
+    const { totalBlocks } = this.config;
     const cols = Math.min(2, this.config.columns);
-    let blockCount = 0;
-    let row = 0;
-
-    while (blockCount < totalBlocks) {
-      for (let col = 0; col < cols && blockCount < totalBlocks; col++) {
-        const bx = x + (col - (cols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-        blockCount++;
-      }
-      row++;
+    let count = 0;
+    for (let row = 0; count < totalBlocks; row++) {
+      count += this.fillRow(row, cols, 1, totalBlocks - count);
     }
   }
 
-  private generateOffset(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
-    const rows = Math.ceil(totalBlocks / columns);
-    let blockCount = 0;
-
-    for (let row = 0; row < rows && blockCount < totalBlocks; row++) {
-      const offsetX = row % 2 === 1 ? blockWidth * 0.5 : 0;
-      for (let col = 0; col < columns && blockCount < totalBlocks; col++) {
-        const bx = x + (col - (columns - 1) / 2) * blockWidth + offsetX;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-        blockCount++;
+  /** Brick-style rows, odd rows shifted half a block. */
+  private layoutOffset(): void {
+    const { totalBlocks, columns, blockWidth } = this.config;
+    let count = 0;
+    for (let row = 0; count < totalBlocks; row++) {
+      const dx = row % 2 === 1 ? blockWidth * 0.5 : 0;
+      for (let col = 0; col < columns && count < totalBlocks; col++) {
+        this.place(row, col, columns, 1, dx);
+        count++;
       }
     }
   }
 
-  /** Two pillars with a span of double-wide blocks across the top. */
-  private generateBridge(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
+  /** Two pillars joined by rows of wide blocks across the top (bridge / span). */
+  private layoutPillarsWithSpan(spanFraction: number, maxSpan: number): void {
+    const { totalBlocks, columns } = this.config;
     const pillarWidth = 2;
     const spanCols = Math.max(columns, pillarWidth * 2 + 2);
+    const spanRows = Math.max(1, Math.floor(totalBlocks * spanFraction));
+    const pillarBudget = totalBlocks - spanRows * spanCols;
+    const pillarRows = Math.ceil(pillarBudget / (pillarWidth * 2));
 
-    // Distribute blocks: span rows on top, rest in pillars
-    const spanRows = Math.max(1, Math.floor(totalBlocks * 0.15));
-    const pillarBlocks = totalBlocks - spanRows * spanCols;
-    const pillarRows = Math.ceil(pillarBlocks / (pillarWidth * 2));
-
-    let blockCount = 0;
-
-    // Build pillars
-    for (let row = 0; row < pillarRows && blockCount < totalBlocks - spanRows * spanCols; row++) {
-      // Left pillar
-      for (let col = 0; col < pillarWidth && blockCount < totalBlocks - spanRows * spanCols; col++) {
-        const bx = x + (col - (spanCols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-        blockCount++;
-      }
-      // Right pillar
-      for (let col = spanCols - pillarWidth; col < spanCols && blockCount < totalBlocks - spanRows * spanCols; col++) {
-        const bx = x + (col - (spanCols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-        blockCount++;
-      }
-    }
-
-    // Build span across top — use double-wide blocks
-    for (let row = 0; row < spanRows; row++) {
-      const spanRow = pillarRows + row;
-      let col = 0;
-      while (col < spanCols && blockCount < totalBlocks) {
-        const canDouble = col % 2 === 0 && col + 1 < spanCols;
-        const bw = canDouble ? blockWidth * 2 : blockWidth;
-        const bx = canDouble
-          ? x + (col + 0.5 - (spanCols - 1) / 2) * blockWidth
-          : x + (col - (spanCols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - spanRow * blockHeight;
-        this.addBlock(bx, by, bw, blockHeight, spanRow, col);
-        if (canDouble) {
-          blockCount += 2;
-          col += 2;
-        } else {
-          blockCount++;
-          col++;
-        }
-      }
+    let count = this.placePillars(pillarRows, spanCols, pillarWidth, pillarBudget);
+    for (let r = 0; r < spanRows; r++) {
+      count += this.fillRow(pillarRows + r, spanCols, maxSpan, totalBlocks - count);
     }
   }
 
-  /** Two sturdy pillars with a long span (2x/3x blocks) across the top. */
-  private generateSpan(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
-    const pillarWidth = 2;
-    const spanCols = Math.max(columns, pillarWidth * 2 + 2);
-
-    const spanRows = Math.max(1, Math.floor(totalBlocks * 0.12));
-    const pillarBlocks = totalBlocks - spanRows * spanCols;
-    const pillarRows = Math.ceil(pillarBlocks / (pillarWidth * 2));
-
-    let blockCount = 0;
-
-    // Pillars
-    for (let row = 0; row < pillarRows && blockCount < totalBlocks - spanRows * spanCols; row++) {
-      for (let col = 0; col < pillarWidth && blockCount < totalBlocks - spanRows * spanCols; col++) {
-        const bx = x + (col - (spanCols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-        blockCount++;
-      }
-      for (let col = spanCols - pillarWidth; col < spanCols && blockCount < totalBlocks - spanRows * spanCols; col++) {
-        const bx = x + (col - (spanCols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-        blockCount++;
-      }
-    }
-
-    // Long span across top — prefer 3x blocks if wide enough
-    for (let row = 0; row < spanRows; row++) {
-      const spanRow = pillarRows + row;
-      let col = 0;
-      while (col < spanCols && blockCount < totalBlocks) {
-        const canTriple = col % 3 === 0 && col + 2 < spanCols;
-        const canDouble = col % 2 === 0 && col + 1 < spanCols;
-        const bw = canTriple ? blockWidth * 3 : canDouble ? blockWidth * 2 : blockWidth;
-        const bx = canTriple
-          ? x + (col + 1 - (spanCols - 1) / 2) * blockWidth
-          : canDouble
-            ? x + (col + 0.5 - (spanCols - 1) / 2) * blockWidth
-            : x + (col - (spanCols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - spanRow * blockHeight;
-        this.addBlock(bx, by, bw, blockHeight, spanRow, col);
-        if (canTriple) {
-          blockCount += 3;
-          col += 3;
-        } else if (canDouble) {
-          blockCount += 2;
-          col += 2;
-        } else {
-          blockCount++;
-          col++;
-        }
-      }
-    }
-  }
-
-  /** Arch with a gap in the middle and a long lintel on top. */
-  private generateArch(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
+  /** Pillars with an open middle, a long lintel, and little roofs on top. */
+  private layoutArch(): void {
+    const { totalBlocks, columns } = this.config;
     const pillarWidth = 2;
     const spanCols = Math.max(columns, pillarWidth * 2 + 3);
-    const gapCols = Math.max(1, spanCols - pillarWidth * 2 - 1);
+    const pillarRows = Math.max(3, Math.floor((totalBlocks * 0.35) / pillarWidth));
 
-    const pillarRows = Math.max(3, Math.floor(totalBlocks * 0.35 / pillarWidth));
-    let blockCount = 0;
+    let count = this.placePillars(pillarRows, spanCols, pillarWidth, totalBlocks);
+    count += this.fillRow(pillarRows, spanCols, 3, totalBlocks - count);
 
-    // Pillars with center gap
-    for (let row = 0; row < pillarRows && blockCount < totalBlocks; row++) {
-      for (let col = 0; col < spanCols && blockCount < totalBlocks; col++) {
-        const inLeft = col < pillarWidth;
-        const inRight = col >= spanCols - pillarWidth;
-        const inGap = col >= pillarWidth && col < spanCols - pillarWidth && gapCols > 0;
-        if (inGap) continue;
-        if (inLeft || inRight) {
-          const bx = x + (col - (spanCols - 1) / 2) * blockWidth;
-          const by = groundY - blockHeight / 2 - row * blockHeight;
-          this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-          blockCount++;
-        }
-      }
-    }
-
-    // Lintel across top with long spans
-    const lintelRow = pillarRows;
-    let col = 0;
-    while (col < spanCols && blockCount < totalBlocks) {
-      const canTriple = col % 3 === 0 && col + 2 < spanCols;
-      const canDouble = col % 2 === 0 && col + 1 < spanCols;
-      const bw = canTriple ? blockWidth * 3 : canDouble ? blockWidth * 2 : blockWidth;
-      const bx = canTriple
-        ? x + (col + 1 - (spanCols - 1) / 2) * blockWidth
-        : canDouble
-          ? x + (col + 0.5 - (spanCols - 1) / 2) * blockWidth
-          : x + (col - (spanCols - 1) / 2) * blockWidth;
-      const by = groundY - blockHeight / 2 - lintelRow * blockHeight;
-      this.addBlock(bx, by, bw, blockHeight, lintelRow, col);
-      if (canTriple) {
-        blockCount += 3;
-        col += 3;
-      } else if (canDouble) {
-        blockCount += 2;
-        col += 2;
-      } else {
-        blockCount++;
-        col++;
-      }
-    }
-
-    // Optional small roof triangles on the lintel
-    if (blockCount < totalBlocks) {
-      const roofRow = lintelRow + 1;
-      for (let colRoof = 0; colRoof < spanCols && blockCount < totalBlocks; colRoof += 2) {
-        const bx = x + (colRoof - (spanCols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - roofRow * blockHeight;
-        this.addTriangleBlock(bx, by, blockWidth, blockHeight, roofRow, colRoof);
-        blockCount++;
-      }
+    for (let col = 0; col < spanCols && count < totalBlocks; col += 2) {
+      this.place(pillarRows + 1, col, spanCols, 1, 0, true);
+      count++;
     }
   }
 
-  /** Alternating tall/short columns creating a battlement profile.
-   *  Base wall uses double-wide blocks for a fortress feel. */
-  private generateCastle(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
-
-    // Base wall height: ~40% of estimated total rows
+  /** Double-wide base wall, turrets on every other column, roofs on the turrets. */
+  private layoutCastle(): void {
+    const { totalBlocks, columns } = this.config;
     const estRows = Math.ceil(totalBlocks / columns);
     const baseRows = Math.max(2, Math.floor(estRows * 0.4));
-    const turretRows = estRows - baseRows;
+    const topRow = estRows;
 
-    let blockCount = 0;
-
-    // Base wall: full width with double-wide blocks
-    for (let row = 0; row < baseRows && blockCount < totalBlocks; row++) {
-      let col = 0;
-      while (col < columns && blockCount < totalBlocks) {
-        const canDouble = col % 2 === 0 && col + 1 < columns;
-        const bw = canDouble ? blockWidth * 2 : blockWidth;
-        const bx = canDouble
-          ? x + (col + 0.5 - (columns - 1) / 2) * blockWidth
-          : x + (col - (columns - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, bw, blockHeight, row, col);
-        if (canDouble) {
-          blockCount += 2;
-          col += 2;
-        } else {
-          blockCount++;
-          col++;
-        }
+    let count = 0;
+    for (let row = 0; row < baseRows && count < totalBlocks; row++) {
+      count += this.fillRow(row, columns, 2, totalBlocks - count);
+    }
+    for (let row = baseRows; row < topRow && count < totalBlocks; row++) {
+      for (let col = 0; col < columns && count < totalBlocks; col += 2) {
+        this.place(row, col, columns);
+        count++;
       }
     }
-
-    // Turrets: every other column extends higher
-    for (let row = baseRows; row < baseRows + turretRows && blockCount < totalBlocks; row++) {
-      for (let col = 0; col < columns && blockCount < totalBlocks; col++) {
-        // Only place blocks on even columns (turrets)
-        if (col % 2 === 0) {
-          const bx = x + (col - (columns - 1) / 2) * blockWidth;
-          const by = groundY - blockHeight / 2 - row * blockHeight;
-          this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-          blockCount++;
-        }
-      }
-    }
-
-    // Small triangle caps on turrets (if space remains)
-    const roofRow = baseRows + turretRows;
-    for (let col = 0; col < columns && blockCount < totalBlocks; col++) {
-      if (col % 2 === 0) {
-        const bx = x + (col - (columns - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - roofRow * blockHeight;
-        this.addTriangleBlock(bx, by, blockWidth, blockHeight, roofRow, col);
-        blockCount++;
-      }
+    for (let col = 0; col < columns && count < totalBlocks; col += 2) {
+      this.place(topRow, col, columns, 1, 0, true);
+      count++;
     }
   }
 
-  /** Inverted structure: narrow base, wider top. Precarious and satisfying to topple. */
-  private generateOverhang(): void {
-    const { totalBlocks, columns, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
-
+  /** Narrow base widening toward the top. Precarious and satisfying to topple. */
+  private layoutOverhang(): void {
+    const { totalBlocks, columns } = this.config;
     const minCols = Math.min(2, columns);
-    const avgCols = (minCols + columns) / 2;
-    const estRows = Math.ceil(totalBlocks / avgCols);
-    let blockCount = 0;
-    let row = 0;
-
-    while (blockCount < totalBlocks) {
+    const estRows = Math.ceil(totalBlocks / ((minCols + columns) / 2));
+    let count = 0;
+    for (let row = 0; count < totalBlocks; row++) {
       const progress = Math.min(1, row / Math.max(1, estRows - 1));
       const rowCols = Math.round(minCols + (columns - minCols) * progress);
+      count += this.fillRow(row, rowCols, 1, totalBlocks - count);
+    }
+  }
 
-      for (let col = 0; col < rowCols && blockCount < totalBlocks; col++) {
-        const bx = x + (col - (rowCols - 1) / 2) * blockWidth;
-        const by = groundY - blockHeight / 2 - row * blockHeight;
-        this.addBlock(bx, by, blockWidth, blockHeight, row, col);
-        blockCount++;
+  /** One block wide, as tall as fits on screen. */
+  private layoutWall(): void {
+    const maxRows = Math.floor((this.effectiveGroundY - 20) / this.config.blockHeight);
+    const rows = Math.min(this.config.totalBlocks, maxRows);
+    for (let row = 0; row < rows; row++) this.place(row, 0, 1);
+  }
+
+  /**
+   * Fill one row left to right using blocks up to `maxSpan` columns wide.
+   * Returns how many single-block units were used (may exceed budget by one wide block).
+   */
+  private fillRow(row: number, cols: number, maxSpan: number, budget: number): number {
+    let used = 0;
+    let col = 0;
+    while (col < cols && used < budget) {
+      const span =
+        maxSpan >= 3 && col % 3 === 0 && col + 2 < cols ? 3
+        : maxSpan >= 2 && col % 2 === 0 && col + 1 < cols ? 2
+        : 1;
+      this.place(row, col, cols, span);
+      used += span;
+      col += span;
+    }
+    return used;
+  }
+
+  /** Stack two pillars at the outer edges of a `cols`-wide footprint. */
+  private placePillars(rows: number, cols: number, pillarWidth: number, budget: number): number {
+    const pillarCols: number[] = [];
+    for (let c = 0; c < pillarWidth; c++) pillarCols.push(c);
+    for (let c = cols - pillarWidth; c < cols; c++) pillarCols.push(c);
+
+    let used = 0;
+    for (let row = 0; row < rows && used < budget; row++) {
+      for (const col of pillarCols) {
+        if (used >= budget) break;
+        this.place(row, col, cols);
+        used++;
       }
-      row++;
     }
+    return used;
   }
 
-  /** Tall thin wall: 1 block wide, many rows. Easy to topple sideways. */
-  private generateWall(): void {
-    const { totalBlocks, blockWidth, blockHeight, x } = this.config;
-    const groundY = this.effectiveGroundY;
-    // Cap rows to keep wall on-screen (leave 20px top margin)
-    const maxRows = Math.floor((groundY - 20) / blockHeight);
-    const rows = Math.min(totalBlocks, maxRows);
-    let blockCount = 0;
-
-    for (let row = 0; row < rows && blockCount < totalBlocks; row++) {
-      const bx = x;
-      const by = groundY - blockHeight / 2 - row * blockHeight;
-      this.addBlock(bx, by, blockWidth, blockHeight, row, 0);
-      blockCount++;
-    }
+  /** Record a block at grid cell (row, col) in a row centered on the building. */
+  private place(row: number, col: number, cols: number, span = 1, dx = 0, roof = false): void {
+    const { x, blockWidth, blockHeight } = this.config;
+    const centerCol = col + (span - 1) / 2;
+    this.specs.push({
+      x: x + (centerCol - (cols - 1) / 2) * blockWidth + dx,
+      y: this.effectiveGroundY - blockHeight / 2 - row * blockHeight,
+      span,
+      row,
+      col,
+      roof,
+    });
   }
 
-  private addBlock(
-    bx: number,
-    by: number,
-    blockWidth: number,
-    blockHeight: number,
-    row: number,
-    col: number
-  ): void {
-    const colorPool = [COLORS.secondary, COLORS.support, COLORS.primary];
-    const color = colorPool[(row + col) % colorPool.length];
+  // ---------------------------------------------------------------------------
+  // Block creation
+  // ---------------------------------------------------------------------------
 
-    const visual = this.createBlockVisual(blockWidth - 2, blockHeight - 2, color);
-    visual.setPosition(bx, by);
+  private createBlock(spec: BlockSpec): void {
+    const { blockWidth, blockHeight } = this.config;
+    const theme = getTheme(this.config.theme);
+    const w = blockWidth * spec.span - 2;
+    const h = blockHeight - 2;
 
-    // Subtle visual distinction for double-wide blocks
-    if (blockWidth > this.config.blockWidth) {
-      visual.setAlpha(0.85);
-    }
-
-    // Row-based density: bottom rows heavier, top rows lighter
+    // Bottom rows are heavier, top rows lighter
     const densityScale = this.totalRows > 1
-      ? 1.0 + 0.3 * (1 - row / (this.totalRows - 1))
+      ? 1.0 + 0.3 * (1 - spec.row / (this.totalRows - 1))
       : 1.0;
+    const physics = {
+      density: runtimeConfig.blockDensity * densityScale,
+      friction: runtimeConfig.blockFriction,
+      restitution: runtimeConfig.restitution,
+      label: 'building_block',
+      collisionFilter: BLOCK_COLLISION,
+    };
 
-    const body = this.scene.matter.add.rectangle(
-      bx,
-      by,
-      blockWidth - 2,
-      blockHeight - 2,
-      {
-        density: runtimeConfig.blockDensity * densityScale,
-        friction: runtimeConfig.blockFriction,
-        restitution: runtimeConfig.restitution,
-        label: 'building_block',
-        collisionFilter: {
-          category: CollisionCategory.BuildingBlock,
-          mask:
-            CollisionCategory.Default |
-            CollisionCategory.WordLetter |
-            CollisionCategory.BuildingBlock |
-            CollisionCategory.Ground,
-        },
-      }
-    );
+    let body: MatterJS.BodyType;
+    let visual: Phaser.GameObjects.Image;
 
-    this.blocks.push({ body, visual });
-  }
-
-  private addTriangleBlock(
-    bx: number,
-    by: number,
-    blockWidth: number,
-    blockHeight: number,
-    row: number,
-    col: number
-  ): void {
-    const colorPool = [COLORS.secondary, COLORS.support, COLORS.primary];
-    const color = colorPool[(row + col) % colorPool.length];
-
-    const visual = this.createTriangleVisual(blockWidth - 2, blockHeight - 2, color);
-    visual.setPosition(bx, by);
-
-    const verts = [
-      { x: -blockWidth / 2 + 1, y: blockHeight / 2 - 1 },
-      { x: blockWidth / 2 - 1, y: blockHeight / 2 - 1 },
-      { x: 0, y: -blockHeight / 2 + 1 },
-    ];
-
-    const body = this.scene.matter.add.fromVertices(
-      bx,
-      by,
-      verts,
-      {
-        density: runtimeConfig.blockDensity,
-        friction: runtimeConfig.blockFriction,
-        restitution: runtimeConfig.restitution,
-        label: 'building_block',
-        collisionFilter: {
-          category: CollisionCategory.BuildingBlock,
-          mask:
-            CollisionCategory.Default |
-            CollisionCategory.WordLetter |
-            CollisionCategory.BuildingBlock |
-            CollisionCategory.Ground,
-        },
-      },
-      true
-    ) as MatterJS.BodyType;
-
-    this.blocks.push({ body, visual });
-  }
-
-  /** Calculate the number of rows for this building configuration. */
-  private calculateTotalRows(): number {
-    const { totalBlocks, columns, blockHeight, pattern } = this.config;
-    let rows = 0;
-
-    switch (pattern) {
-      case 'pyramid': {
-        let remaining = totalBlocks;
-        let rowCols = columns;
-        while (remaining > 0) {
-          const placed = Math.min(rowCols, remaining);
-          rows++;
-          remaining -= placed;
-          rowCols--;
-          if (rowCols <= 0) {
-            rowCols = columns;
-          }
-        }
-        break;
-      }
-      case 'tower': {
-        const cols = Math.min(2, columns);
-        rows = Math.ceil(totalBlocks / cols);
-        break;
-      }
-      case 'bridge': {
-        const pillarWidth = 2;
-        const spanCols = Math.max(columns, pillarWidth * 2 + 2);
-        const spanRows = Math.max(1, Math.floor(totalBlocks * 0.15));
-        const pillarBlocks = totalBlocks - spanRows * spanCols;
-        const pillarRows = Math.ceil(pillarBlocks / (pillarWidth * 2));
-        rows = pillarRows + spanRows;
-        break;
-      }
-      case 'span': {
-        const pillarWidth = 2;
-        const spanCols = Math.max(columns, pillarWidth * 2 + 2);
-        const spanRows = Math.max(1, Math.floor(totalBlocks * 0.12));
-        const pillarBlocks = totalBlocks - spanRows * spanCols;
-        const pillarRows = Math.ceil(pillarBlocks / (pillarWidth * 2));
-        rows = pillarRows + spanRows;
-        break;
-      }
-      case 'arch': {
-        const pillarWidth = 2;
-        const spanCols = Math.max(columns, pillarWidth * 2 + 3);
-        const pillarRows = Math.max(3, Math.floor(totalBlocks * 0.35 / pillarWidth));
-        rows = pillarRows + 2;
-        break;
-      }
-      case 'castle': {
-        const estRows = Math.ceil(totalBlocks / columns);
-        const baseRows = Math.max(2, Math.floor(estRows * 0.4));
-        const baseBlocks = baseRows * columns;
-        const turretBlocks = totalBlocks - baseBlocks;
-        const turretCols = Math.ceil(columns / 2);
-        const turretRows = turretBlocks > 0 ? Math.ceil(turretBlocks / turretCols) : 0;
-        rows = baseRows + turretRows;
-        break;
-      }
-      case 'overhang': {
-        const minCols = Math.min(2, columns);
-        const avgCols = (minCols + columns) / 2;
-        const estRows = Math.ceil(totalBlocks / avgCols);
-        let remaining = totalBlocks;
-        let r = 0;
-        while (remaining > 0) {
-          const progress = Math.min(1, r / Math.max(1, estRows - 1));
-          const rowCols = Math.round(minCols + (columns - minCols) * progress);
-          remaining -= Math.min(rowCols, remaining);
-          r++;
-        }
-        rows = r;
-        break;
-      }
-      case 'wall': {
-        const maxRows = Math.floor((this.effectiveGroundY - 20) / blockHeight);
-        rows = Math.min(totalBlocks, maxRows);
-        break;
-      }
-      default:
-        // stack, offset
-        rows = Math.ceil(totalBlocks / columns);
+    if (spec.roof) {
+      const verts = [
+        { x: -w / 2, y: h / 2 },
+        { x: w / 2, y: h / 2 },
+        { x: 0, y: -h / 2 },
+      ];
+      body = this.scene.matter.add.fromVertices(spec.x, spec.y, verts, physics, true) as MatterJS.BodyType;
+      // Matter positions a triangle by its centroid, which sits 2/3 of the way down
+      visual = this.scene.add
+        .image(body.position.x, body.position.y, roofTexture(this.scene, w, h, theme.roof))
+        .setOrigin(0.5, 2 / 3);
+    } else {
+      const color = theme.blocks[(spec.row + spec.col) % theme.blocks.length];
+      const variant: BlockVariant = Math.random() < 0.35 ? 'lit' : 'dark';
+      body = this.scene.matter.add.rectangle(spec.x, spec.y, w, h, physics);
+      visual = this.scene.add.image(spec.x, spec.y, blockTexture(this.scene, w, h, color, variant));
     }
+    visual.setDisplaySize(w, h);
 
-    return rows;
+    this.blocks.push({ body, visual });
   }
 
-  /** Compute the initial height from the config (before physics settles).
-   *  Includes pedestal height since height is measured from actual ground. */
+  /** Initial height from ground, including the pedestal. */
   getInitialHeight(): number {
     return this.totalRows * this.config.blockHeight + this.config.pedestalHeight;
   }
@@ -658,7 +334,6 @@ export class Building {
 
   /** Shift all block bodies and visuals by dx (used after camera scroll reset). */
   offsetAllBlocks(dx: number): void {
-    const MatterBody = (Phaser.Physics.Matter as any).Matter.Body;
     for (const block of this.blocks) {
       MatterBody.setPosition(block.body, {
         x: block.body.position.x + dx,
@@ -667,8 +342,7 @@ export class Building {
       block.visual.x = block.body.position.x;
     }
 
-    // Shift pedestal too — use Matter.Body.setPosition for static bodies
-    // (direct manipulation doesn't update bounds, breaking collision detection)
+    // Static bodies need Body.setPosition so their bounds (and collisions) update
     if (this.pedestalBody) {
       MatterBody.setPosition(this.pedestalBody, {
         x: this.pedestalBody.position.x + dx,
@@ -682,7 +356,7 @@ export class Building {
 
   update(): void {
     // Blocks that fall below the pedestal surface get reduced friction
-    // so subsequent hits slide them easily instead of feeling "stuck"
+    // so later hits slide them easily instead of feeling "stuck"
     const fallenThreshold = this.effectiveGroundY + 5;
 
     for (const block of this.blocks) {
@@ -698,7 +372,6 @@ export class Building {
   freezeBlocks(): void {
     if (this.frozen) return;
     this.frozen = true;
-    const MatterBody = (Phaser.Physics.Matter as any).Matter.Body;
     for (const block of this.blocks) {
       MatterBody.setStatic(block.body, true);
     }
@@ -707,7 +380,6 @@ export class Building {
   releaseBlocks(): void {
     if (!this.frozen) return;
     this.frozen = false;
-    const MatterBody = (Phaser.Physics.Matter as any).Matter.Body;
     for (const block of this.blocks) {
       MatterBody.setStatic(block.body, false);
     }
@@ -728,82 +400,5 @@ export class Building {
       this.pedestalVisual.destroy();
       this.pedestalVisual = null;
     }
-  }
-
-  private createBlockVisual(
-    width: number,
-    height: number,
-    baseColor: number
-  ): Phaser.GameObjects.Graphics {
-    const gfx = this.scene.add.graphics();
-
-    const lighter = this.tintColor(baseColor, 1.15);
-    const darker = this.tintColor(baseColor, 0.82);
-    const outline = this.tintColor(baseColor, 0.7);
-
-    const x = -width / 2;
-    const y = -height / 2;
-    const bevelH = Math.max(4, Math.round(height * 0.22));
-
-    // Base fill
-    gfx.fillStyle(baseColor, 1);
-    gfx.fillRect(x, y, width, height);
-
-    // Top bevel
-    gfx.fillStyle(lighter, 0.9);
-    gfx.fillRect(x, y, width, bevelH);
-
-    // Bottom bevel
-    gfx.fillStyle(darker, 0.9);
-    gfx.fillRect(x, y + height - bevelH, width, bevelH);
-
-    // Edge outline
-    gfx.lineStyle(2, outline, 0.7);
-    gfx.strokeRect(x + 1, y + 1, width - 2, height - 2);
-
-    return gfx;
-  }
-
-  private createTriangleVisual(
-    width: number,
-    height: number,
-    baseColor: number
-  ): Phaser.GameObjects.Graphics {
-    const gfx = this.scene.add.graphics();
-    const lighter = this.tintColor(baseColor, 1.12);
-    const outline = this.tintColor(baseColor, 0.7);
-
-    const x = -width / 2;
-    const y = height / 2;
-    const topX = 0;
-    const topY = -height / 2;
-
-    // Base fill
-    gfx.fillStyle(baseColor, 1);
-    gfx.fillTriangle(x, y, -x, y, topX, topY);
-
-    // Top highlight (small inner triangle)
-    gfx.fillStyle(lighter, 0.7);
-    gfx.fillTriangle(
-      x * 0.6,
-      y * 0.8,
-      -x * 0.6,
-      y * 0.8,
-      0,
-      topY * 0.8
-    );
-
-    // Outline
-    gfx.lineStyle(2, outline, 0.6);
-    gfx.strokeTriangle(x + 1, y - 1, -x - 1, y - 1, topX, topY + 1);
-
-    return gfx;
-  }
-
-  private tintColor(color: number, factor: number): number {
-    const r = Phaser.Math.Clamp(Math.round(((color >> 16) & 0xff) * factor), 0, 255);
-    const g = Phaser.Math.Clamp(Math.round(((color >> 8) & 0xff) * factor), 0, 255);
-    const b = Phaser.Math.Clamp(Math.round((color & 0xff) * factor), 0, 255);
-    return (r << 16) | (g << 8) | b;
   }
 }

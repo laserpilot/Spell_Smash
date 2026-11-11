@@ -20,6 +20,12 @@ import { GameStateManager } from '../managers/GameStateManager';
 import { AudioManager } from '../managers/AudioManager';
 import { DebugPanel } from '../debug/DebugPanel';
 import { SfxManager } from '../managers/SfxManager';
+import { Scenery } from '../art/Scenery';
+import { drawBeveledPanel } from '../art/draw';
+import { SCENE } from '../art/palette';
+
+/** How far the threshold line reaches left/right of the building center. */
+const THRESHOLD_LINE = { left: 190, right: 150 };
 
 export class GameScene extends Phaser.Scene {
   private ground!: Ground;
@@ -47,12 +53,18 @@ export class GameScene extends Phaser.Scene {
   private impactEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
   private trailEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
   private confettiEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private dustEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
   private debugPanel!: DebugPanel;
-  private clouds: Phaser.GameObjects.Ellipse[] = [];
+  private scenery!: Scenery;
+  /** Second camera that draws the HUD so camera zoom/shake effects don't move it. */
+  private hudCam!: Phaser.Cameras.Scene2D.Camera;
+  private zoomTween: Phaser.Tweens.Tween | null = null;
   private streakGlow: Phaser.GameObjects.Graphics | null = null;
   private streakGlowTween: Phaser.Tweens.Tween | null = null;
   private thresholdLineGfx!: Phaser.GameObjects.Graphics;
   private percentText!: Phaser.GameObjects.Text;
+  private percentTagBg!: Phaser.GameObjects.Graphics;
+  private percentTag!: Phaser.GameObjects.Container;
   private originalBuildingHeight = 0;
   private hasHadImpact = false;
   private thresholdCrossed = false;
@@ -80,9 +92,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.cameras.main.setZoom(DPR).setOrigin(0, 0);
+    const cam = this.cameras.main;
+    cam.setZoom(DPR).setOrigin(0, 0).setScroll(0, 0);
 
-    // Reset state
+    // HUD camera: renders only objects passed to toHud(). Everything else
+    // added to the scene is hidden from it automatically.
+    this.hudCam = this.cameras
+      .add(0, 0, this.scale.width, this.scale.height)
+      .setZoom(DPR)
+      .setOrigin(0, 0);
+    this.events.on(Phaser.Scenes.Events.ADDED_TO_SCENE, this.hideFromHud, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.events.off(Phaser.Scenes.Events.ADDED_TO_SCENE, this.hideFromHud, this);
+    });
+
+    // Reset state (Phaser reuses this scene instance on restart)
+    this.time.timeScale = 1;
+    this.slowMoTriggered = false;
+    this.slowMoActive = false;
+    this.zoomTween = null;
+    this.streakGlow = null;
+    this.streakGlowTween = null;
+    this.oldBuilding = null;
     this.activeProjectile = null;
     this.oldProjectiles = [];
     this.impactHandled = false;
@@ -110,32 +141,12 @@ export class GameScene extends Phaser.Scene {
     this.audioManager = new AudioManager();
     this.sfx = new SfxManager();
 
-    // Layered gradient background
-    this.drawGradientBackground();
-
-    // Background clouds
-    this.clouds = [];
-    for (let i = 0; i < 5; i++) {
-      const cx = Phaser.Math.Between(100, GAME_WIDTH - 100);
-      const cy = Phaser.Math.Between(60, 220);
-      const cloud = this.add
-        .ellipse(
-          cx,
-          cy,
-          Phaser.Math.Between(80, 160),
-          Phaser.Math.Between(30, 50),
-          0xffffff,
-          0.6
-        )
-        .setDepth(0)
-        .setScrollFactor(0.3);
-      this.clouds.push(cloud);
-    }
-
-    // Ground
+    // Backdrop and ground
+    this.scenery = new Scenery(this);
     this.ground = new Ground(this);
 
-    // Launch pad shadow + visual
+    // Launch pad: fixed stand on the ground, plus the tray (shadow + deck)
+    this.drawLaunchStand();
     this.launchPadShadow = this.add.graphics().setDepth(2);
     this.launchPadGfx = this.add.graphics().setDepth(3);
     this.drawLaunchPad();
@@ -156,7 +167,7 @@ export class GameScene extends Phaser.Scene {
 
     // Word display background
     this.wordDisplayBg = this.add.graphics().setDepth(8);
-    this.drawBeveledPanel(
+    drawBeveledPanel(
       this.wordDisplayBg,
       LAYOUT.wordDisplayX - 130,
       LAYOUT.wordDisplayY - 45,
@@ -207,6 +218,8 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '22px',
         color: COLOR_STRINGS.neutral,
+        stroke: '#FFFFFF',
+        strokeThickness: 4,
         resolution: DPR,
       })
       .setOrigin(1, 0.5)
@@ -218,6 +231,8 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '16px',
         color: COLOR_STRINGS.neutral,
+        stroke: '#FFFFFF',
+        strokeThickness: 4,
         resolution: DPR,
       })
       .setOrigin(0, 0.5)
@@ -228,6 +243,8 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '32px',
         color: COLOR_STRINGS.secondary,
+        stroke: '#FFFFFF',
+        strokeThickness: 4,
         resolution: DPR,
       })
       .setOrigin(0, 0.5)
@@ -242,52 +259,74 @@ export class GameScene extends Phaser.Scene {
     // Restart button (top-right corner)
     this.restartBtn = this.createRestartButton();
 
-    // HUD elements: fixed to camera (don't scroll with the world)
+    // The launch pad stays put while the world scrolls between buildings
     this.launchPadShadow.setScrollFactor(0);
     this.launchPadGfx.setScrollFactor(0);
-    this.wordDisplayShadow.setScrollFactor(0);
-    this.wordDisplayBg.setScrollFactor(0);
-    this.wordDisplayText.setScrollFactor(0);
-    this.feedbackText.setScrollFactor(0);
-    this.hintText.setScrollFactor(0);
-    this.buildingLabel.setScrollFactor(0);
-    this.streakLabel.setScrollFactor(0);
-    this.streakCountText.setScrollFactor(0);
-    this.progressBarBg.setScrollFactor(0);
-    this.progressBarFill.setScrollFactor(0);
-    this.progressLabel.setScrollFactor(0);
-    this.hearAgainBtn.setScrollFactor(0);
-    this.restartBtn.setScrollFactor(0);
+
+    // HUD elements: drawn by the HUD camera, unaffected by zoom and shake
+    this.toHud(
+      this.wordDisplayShadow,
+      this.wordDisplayBg,
+      this.wordDisplayText,
+      this.feedbackText,
+      this.hintText,
+      this.buildingLabel,
+      this.streakLabel,
+      this.streakCountText,
+      this.progressBarBg,
+      this.progressBarFill,
+      this.progressLabel,
+      this.hearAgainBtn,
+      this.restartBtn,
+      ...this.inputManager.getHudObjects()
+    );
 
     // Particle emitters (inactive until triggered)
+    // Chunky debris chips flung from the impact
     this.impactEmitter = this.add.particles(0, 0, 'particle', {
-      speed: { min: 50, max: 200 },
+      speed: { min: 80, max: 260 },
       angle: { min: 200, max: 340 },
-      scale: { start: 1, end: 0 },
-      lifespan: { min: 300, max: 600 },
-      gravityY: 300,
-      tint: [COLORS.neutral, COLORS.support, COLORS.secondary],
+      scale: { start: 1.1, end: 0.2 },
+      rotate: { min: 0, max: 360 },
+      lifespan: { min: 400, max: 800 },
+      gravityY: 500,
+      tint: [COLORS.neutral, COLORS.support, COLORS.secondary, 0xffffff],
       emitting: false,
     });
     this.impactEmitter.setDepth(15);
 
-    this.trailEmitter = this.add.particles(0, 0, 'particle', {
-      speed: { min: 10, max: 40 },
-      scale: { start: 0.5, end: 0 },
-      lifespan: { min: 200, max: 400 },
-      alpha: { start: 0.6, end: 0 },
+    // Soft dust clouds that bloom and fade
+    this.dustEmitter = this.add.particles(0, 0, 'puff', {
+      speed: { min: 15, max: 70 },
+      scale: { start: 0.5, end: 1.6 },
+      alpha: { start: 0.75, end: 0 },
+      lifespan: { min: 600, max: 1100 },
+      gravityY: -20,
+      tint: [0xe9dfcf, 0xd8cbb6, 0xffffff],
+      emitting: false,
+    });
+    this.dustEmitter.setDepth(14);
+
+    this.trailEmitter = this.add.particles(0, 0, 'dot', {
+      speed: { min: 5, max: 30 },
+      scale: { start: 0.7, end: 0 },
+      lifespan: { min: 250, max: 450 },
+      alpha: { start: 0.7, end: 0 },
       tint: COLORS.primary,
+      blendMode: Phaser.BlendModes.NORMAL,
       emitting: false,
     });
     this.trailEmitter.setDepth(3);
 
     this.confettiEmitter = this.add.particles(0, 0, 'particle', {
-      speed: { min: 100, max: 350 },
+      speed: { min: 120, max: 380 },
       angle: { min: 220, max: 320 },
-      scale: { start: 1.5, end: 0 },
-      lifespan: { min: 800, max: 1500 },
-      gravityY: 200,
-      tint: [0xff6b6b, 0xffd93d, 0x6bcb77, 0x4d96ff, COLORS.support],
+      scale: { start: 1.3, end: 0.6 },
+      rotate: { start: 0, end: 540 },
+      alpha: { start: 1, end: 0 },
+      lifespan: { min: 900, max: 1600 },
+      gravityY: 260,
+      tint: [0xff6b6b, 0xffd93d, 0x6bcb77, 0x4d96ff, COLORS.support, 0xc779a4],
       emitting: false,
     });
     this.confettiEmitter.setDepth(25);
@@ -295,16 +334,20 @@ export class GameScene extends Phaser.Scene {
     // Threshold line graphic (drawn when building is created)
     this.thresholdLineGfx = this.add.graphics().setDepth(2);
 
-    // Destruction percentage text (near threshold line)
+    // Destruction percentage tag at the right end of the threshold line
+    this.percentTagBg = this.add.graphics();
     this.percentText = this.add
       .text(0, 0, '', {
         fontFamily: FONT_FAMILY,
-        fontSize: '18px',
-        color: COLOR_STRINGS.support,
+        fontSize: '17px',
+        color: '#D93636',
         resolution: DPR,
       })
-      .setOrigin(0, 0.5)
-      .setDepth(10);
+      .setOrigin(0, 0.5);
+    this.percentTag = this.add
+      .container(0, 0, [this.percentTagBg, this.percentText])
+      .setDepth(10)
+      .setVisible(false);
 
     // Debug panel (toggle with backtick key)
     this.debugPanel = new DebugPanel(() => this.rebuildCurrentBuilding());
@@ -323,95 +366,111 @@ export class GameScene extends Phaser.Scene {
     this.startNewBuilding();
   }
 
+  /** Show these objects only on the HUD camera (fixed on screen, no zoom/shake). */
+  private toHud(...objects: Phaser.GameObjects.GameObject[]): void {
+    for (const obj of objects) {
+      obj.cameraFilter = this.cameras.main.id;
+      if (obj instanceof Phaser.GameObjects.Container) {
+        this.toHud(...obj.list);
+      }
+    }
+  }
+
+  private hideFromHud(obj: Phaser.GameObjects.GameObject): void {
+    this.hudCam.ignore(obj);
+  }
+
+  /**
+   * Zoom the world camera to `factor` × normal (HUD unaffected). Replaces any
+   * zoom in progress; Phaser's zoomTo silently ignores calls made mid-zoom.
+   */
+  private zoomWorld(factor: number, duration: number, yoyo = false): void {
+    this.zoomTween?.stop();
+    this.zoomTween = this.tweens.add({
+      targets: this.cameras.main,
+      zoom: DPR * factor,
+      duration,
+      yoyo,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        this.zoomTween = null;
+      },
+    });
+  }
+
+  private resetWorldZoom(): void {
+    this.zoomTween?.stop();
+    this.zoomTween = null;
+    this.cameras.main.setZoom(DPR);
+  }
+
+  private getLaunchPadTop(): number {
+    return LAYOUT.launchOriginY - LAYOUT.launchPadHeight / 2 + 10;
+  }
+
+  /** Wooden trestle the launch tray sits on. Always visible. */
+  private drawLaunchStand(): void {
+    const gfx = this.add.graphics().setDepth(1).setScrollFactor(0);
+    const left = this.getLaunchPadLeft();
+    const w = LAYOUT.launchPadWidth;
+    const top = this.getLaunchPadTop() + LAYOUT.launchPadHeight - 6;
+    const bottom = LAYOUT.groundY + 4;
+    const legW = 14;
+    const legs = [left + 36, left + w - 36 - legW];
+
+    // Cross braces
+    gfx.lineStyle(7, SCENE.woodDark, 1);
+    gfx.lineBetween(legs[0] + legW / 2, top + 10, legs[1] + legW / 2, bottom - 14);
+    gfx.lineBetween(legs[1] + legW / 2, top + 10, legs[0] + legW / 2, bottom - 14);
+
+    for (const lx of legs) {
+      gfx.fillStyle(SCENE.woodDark, 1);
+      gfx.fillRect(lx, top, legW, bottom - top);
+      gfx.fillStyle(SCENE.wood, 1);
+      gfx.fillRect(lx + 2, top, legW - 6, bottom - top);
+      // Foot
+      gfx.fillStyle(SCENE.stoneDark, 1);
+      gfx.fillRoundedRect(lx - 5, bottom - 10, legW + 10, 10, 3);
+    }
+  }
+
+  /** Wooden launch tray the letters sit in. */
   private drawLaunchPad(): void {
     this.launchPadGfx.clear();
     this.launchPadShadow.clear();
-    const padW = LAYOUT.launchPadWidth;
-    const padH = LAYOUT.launchPadHeight;
-    const padX = this.getLaunchPadLeft();
-    const padY = LAYOUT.launchOriginY - padH / 2 + 10; // slightly below letter center
+    const w = LAYOUT.launchPadWidth;
+    const h = LAYOUT.launchPadHeight;
+    const x = this.getLaunchPadLeft();
+    const y = this.getLaunchPadTop();
+    const gfx = this.launchPadGfx;
 
-    // Shadow
-    this.launchPadShadow.fillStyle(0x000000, 0.1);
-    this.launchPadShadow.fillRoundedRect(padX + 3, padY + 4, padW, padH, 12);
+    this.launchPadShadow.fillStyle(0x000000, 0.12);
+    this.launchPadShadow.fillRoundedRect(x + 3, y + 5, w, h, 12);
 
-    // Shallow bowl / platform shape with bevel + outline
-    this.drawBeveledPanel(
-      this.launchPadGfx,
-      padX,
-      padY,
-      padW,
-      padH,
-      COLORS.neutral,
-      0.12,
-      12
-    );
-  }
+    // Back wall
+    gfx.fillStyle(SCENE.woodDark, 1);
+    gfx.fillRoundedRect(x, y, w, h, 12);
+    gfx.fillStyle(SCENE.wood, 1);
+    gfx.fillRoundedRect(x + 4, y + 4, w - 8, h - 14, 9);
 
-  private drawGradientBackground(): void {
-    const gfx = this.add.graphics().setDepth(-2);
-    const bands = 24;
-    const bandH = Math.ceil(GAME_HEIGHT / bands);
-    const topR = (COLORS.gradientTop >> 16) & 0xff;
-    const topG = (COLORS.gradientTop >> 8) & 0xff;
-    const topB = COLORS.gradientTop & 0xff;
-    const botR = (COLORS.gradientBottom >> 16) & 0xff;
-    const botG = (COLORS.gradientBottom >> 8) & 0xff;
-    const botB = COLORS.gradientBottom & 0xff;
-
-    for (let i = 0; i < bands; i++) {
-      const t = i / (bands - 1);
-      const r = Math.round(topR + (botR - topR) * t);
-      const g = Math.round(topG + (botG - topG) * t);
-      const b = Math.round(topB + (botB - topB) * t);
-      const color = (r << 16) | (g << 8) | b;
-      gfx.fillStyle(color, 1);
-      gfx.fillRect(0, i * bandH, GAME_WIDTH, bandH + 1);
+    // Plank lines
+    gfx.lineStyle(1.5, SCENE.woodDark, 0.45);
+    for (let py = y + 16; py < y + h - 12; py += 12) {
+      gfx.lineBetween(x + 8, py, x + w - 8, py);
     }
 
-    // Soft abstract shapes for depth
-    const shapes = this.add.graphics().setDepth(-1).setScrollFactor(0.1);
-    shapes.fillStyle(COLORS.secondary, 0.06);
-    shapes.fillEllipse(200, 500, 300, 200);
-    shapes.fillStyle(COLORS.support, 0.05);
-    shapes.fillEllipse(900, 200, 250, 180);
-    shapes.fillStyle(COLORS.primary, 0.04);
-    shapes.fillEllipse(600, 650, 350, 150);
-  }
+    // Front rim with highlight
+    gfx.fillStyle(SCENE.woodDark, 1);
+    gfx.fillRoundedRect(x, y + h - 16, w, 16, { tl: 0, tr: 0, bl: 12, br: 12 });
+    gfx.fillStyle(SCENE.woodLight, 1);
+    gfx.fillRect(x + 6, y + h - 16, w - 12, 3);
 
-  private tintColor(color: number, factor: number): number {
-    const r = Phaser.Math.Clamp(Math.round(((color >> 16) & 0xff) * factor), 0, 255);
-    const g = Phaser.Math.Clamp(Math.round(((color >> 8) & 0xff) * factor), 0, 255);
-    const b = Phaser.Math.Clamp(Math.round((color & 0xff) * factor), 0, 255);
-    return (r << 16) | (g << 8) | b;
-  }
-
-  private drawBeveledPanel(
-    gfx: Phaser.GameObjects.Graphics,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    baseColor: number,
-    baseAlpha: number,
-    radius: number
-  ): void {
-    const lighter = this.tintColor(baseColor, 1.15);
-    const darker = this.tintColor(baseColor, 0.85);
-    const outline = this.tintColor(baseColor, 0.7);
-    const bevelH = Math.max(4, Math.round(height * 0.22));
-
-    gfx.fillStyle(baseColor, baseAlpha);
-    gfx.fillRoundedRect(x, y, width, height, radius);
-
-    gfx.fillStyle(lighter, baseAlpha * 0.9);
-    gfx.fillRoundedRect(x, y, width, bevelH, radius);
-
-    gfx.fillStyle(darker, baseAlpha * 0.9);
-    gfx.fillRoundedRect(x, y + height - bevelH, width, bevelH, radius);
-
-    gfx.lineStyle(2, outline, 0.35);
-    gfx.strokeRoundedRect(x + 1, y + 1, width - 2, height - 2, radius);
+    // Rivets
+    gfx.fillStyle(SCENE.stoneLight, 1);
+    for (const rx of [x + 14, x + w - 14]) {
+      gfx.fillCircle(rx, y + 12, 3);
+      gfx.fillCircle(rx, y + h - 8, 3);
+    }
   }
 
   private createProgressBar(): void {
@@ -422,7 +481,7 @@ export class GameScene extends Phaser.Scene {
 
     // Background
     this.progressBarBg = this.add.graphics().setDepth(10);
-    this.progressBarBg.fillStyle(COLORS.neutral, 0.15);
+    this.progressBarBg.fillStyle(0xffffff, 0.6);
     this.progressBarBg.fillRoundedRect(barX, barY, barWidth, barHeight, 8);
     this.progressBarBg.lineStyle(1, COLORS.neutral, 0.3);
     this.progressBarBg.strokeRoundedRect(barX, barY, barWidth, barHeight, 8);
@@ -436,6 +495,8 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: '16px',
         color: COLOR_STRINGS.neutral,
+        stroke: '#FFFFFF',
+        strokeThickness: 4,
         resolution: DPR,
       })
       .setOrigin(0.5)
@@ -521,8 +582,8 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(30)
-      .setScrollFactor(0)
       .setScale(0);
+    this.toHud(celebText);
 
     // Bounce-in animation
     this.tweens.add({
@@ -610,8 +671,8 @@ export class GameScene extends Phaser.Scene {
       ease: 'Sine.easeOut',
     });
 
-    // Zoom camera in slightly
-    this.cameras.main.zoomTo(DPR * 1.05, 200, 'Sine.easeOut');
+    // Zoom in slightly (the HUD camera is unaffected)
+    this.zoomWorld(1.05, 200);
   }
 
   /** Return to normal time. */
@@ -635,8 +696,7 @@ export class GameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
-    // Zoom camera back
-    this.cameras.main.zoomTo(DPR, 250, 'Sine.easeInOut');
+    this.zoomWorld(1, 250);
   }
 
   private getLaunchPadLeft(): number {
@@ -696,12 +756,13 @@ export class GameScene extends Phaser.Scene {
     const thresholdHeight = this.getThresholdHeight(height);
     const lineY = LAYOUT.groundY - thresholdHeight;
 
-    // Dashed red line across the building area
-    this.thresholdLineGfx.lineStyle(2, 0xff4444, 0.5);
+    // Dashed red line across the building area. It stops short on the right
+    // to leave room for the percentage tag.
+    this.thresholdLineGfx.lineStyle(2, 0xff4444, 0.6);
     const dashLen = 10;
     const gapLen = 8;
-    const startX = cx - 200;
-    const endX = cx + 200;
+    const startX = cx - THRESHOLD_LINE.left;
+    const endX = cx + THRESHOLD_LINE.right;
 
     this.thresholdLineGfx.beginPath();
     for (let x = startX; x < endX; x += dashLen + gapLen) {
@@ -750,8 +811,22 @@ export class GameScene extends Phaser.Scene {
     const knocked = this.originalBuildingHeight - currentHeight;
     const percent = Math.min(100, Math.max(0, Math.round((knocked / aboveThreshold) * 100)));
     this.percentText.setText(`${percent}%`);
+
+    // White pill behind the number, sized to fit it
+    const padX = 8;
+    const w = this.percentText.width + padX * 2;
+    const h = 26;
+    this.percentText.setPosition(padX, 0);
+    this.percentTagBg.clear();
+    this.percentTagBg.fillStyle(0xffffff, 0.92);
+    this.percentTagBg.fillRoundedRect(0, -h / 2, w, h, h / 2);
+    this.percentTagBg.lineStyle(2, 0xff4444, 0.7);
+    this.percentTagBg.strokeRoundedRect(0, -h / 2, w, h, h / 2);
+
     const lineY = LAYOUT.groundY - thresholdH;
-    this.percentText.setPosition(LAYOUT.buildingX + 160, lineY);
+    this.percentTag
+      .setPosition(LAYOUT.buildingX + THRESHOLD_LINE.right + 6, lineY)
+      .setVisible(true);
   }
 
   private rebuildCurrentBuilding(): void {
@@ -776,15 +851,16 @@ export class GameScene extends Phaser.Scene {
     shadow.fillRoundedRect(-width / 2 + 3, -height / 2 + 4, width, height, 8);
 
     const bg = this.add.graphics();
-    this.drawBeveledPanel(
+    drawBeveledPanel(
       bg,
       -width / 2,
       -height / 2,
       width,
       height,
-      COLORS.neutral,
-      0.15,
-      8
+      0xffffff,
+      0.92,
+      8,
+      COLORS.neutral
     );
 
     const label = this.add
@@ -827,15 +903,16 @@ export class GameScene extends Phaser.Scene {
     const height = 36;
 
     const bg = this.add.graphics();
-    this.drawBeveledPanel(
+    drawBeveledPanel(
       bg,
       -width / 2,
       -height / 2,
       width,
       height,
-      COLORS.support,
-      0.2,
-      8
+      0xffffff,
+      0.92,
+      8,
+      COLORS.support
     );
 
     const label = this.add
@@ -917,7 +994,7 @@ export class GameScene extends Phaser.Scene {
     this.originalBuildingHeight = this.building.getInitialHeight();
     this.hasHadImpact = false;
     this.thresholdCrossed = false;
-    this.percentText.setText('');
+    this.percentTag.setVisible(false);
     this.thresholdLineGfx.clear();
     this.drawThresholdLine();
 
@@ -1036,8 +1113,6 @@ export class GameScene extends Phaser.Scene {
       this.feedbackText.setText('');
       this.hintText.setVisible(false);
       this.hearAgainBtn.setVisible(false);
-      this.launchPadGfx.setVisible(false);
-      this.launchPadShadow.setVisible(false);
 
       // Launch the projectile directly — letters are already on the pad
       this.gameState.phase = GamePhase.Launching;
@@ -1118,8 +1193,8 @@ export class GameScene extends Phaser.Scene {
       // Create streak glow if it doesn't exist
       if (!this.streakGlow) {
         this.streakGlow = this.add.graphics()
-          .setDepth(this.streakCountText.depth - 1)
-          .setScrollFactor(0);
+          .setDepth(this.streakCountText.depth - 1);
+        this.toHud(this.streakGlow);
         this.drawStreakGlow();
 
         this.streakGlowTween = this.tweens.add({
@@ -1269,6 +1344,7 @@ export class GameScene extends Phaser.Scene {
     // Dust/debris particles at impact point
     const particleCount = isSuper ? 30 : isOnFire ? 20 : 12;
     this.impactEmitter.emitParticleAt(impactX, impactY, particleCount);
+    this.dustEmitter.emitParticleAt(impactX, impactY, Math.round(particleCount / 2));
 
     // Apply outward force to nearby building blocks for satisfying physics response.
     // Supplements the physical collision (letters persist for 150ms before becoming Rubble).
@@ -1394,11 +1470,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Camera zoom pulse
-    this.cameras.main.zoomTo(DPR * 1.05, 200, 'Sine.easeInOut', false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
-      if (progress === 1) {
-        this.cameras.main.zoomTo(DPR, 300, 'Sine.easeInOut');
-      }
-    });
+    this.zoomWorld(1.05, 250, true);
 
     const completeText = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50, 'Level Complete!', {
@@ -1410,6 +1482,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(20)
       .setScale(0);
+    this.toHud(completeText);
 
     // Bounce-in animation for text
     this.tweens.add({
@@ -1428,6 +1501,7 @@ export class GameScene extends Phaser.Scene {
 
   private transitionToNextBuilding(): void {
     this.gameState.phase = GamePhase.TransitionToNext;
+    this.resetWorldZoom();
 
     // Keep old building visible — it scrolls away
     this.oldBuilding = this.building;
@@ -1443,7 +1517,7 @@ export class GameScene extends Phaser.Scene {
     this.originalBuildingHeight = this.building.getInitialHeight();
     this.hasHadImpact = false;
     this.thresholdCrossed = false;
-    this.percentText.setText('');
+    this.percentTag.setVisible(false);
     this.buildingLabel.setText(
       `Building ${this.gameState.currentBuildingIndex + 1}`
     );
@@ -1472,18 +1546,13 @@ export class GameScene extends Phaser.Scene {
         // Shift new building blocks to standard world position
         this.building.offsetAllBlocks(-GAME_WIDTH);
 
-        // Reset camera
+        // Reset camera; scenery keeps its parallax offset
         this.cameras.main.scrollX = 0;
+        this.scenery.commitScroll(GAME_WIDTH);
 
         // Redraw threshold at standard position
         this.thresholdLineGfx.clear();
         this.drawThresholdLine();
-
-        // Scatter clouds to new random positions
-        for (const cloud of this.clouds) {
-          cloud.x = Phaser.Math.Between(100, GAME_WIDTH - 100);
-          cloud.y = Phaser.Math.Between(60, 220);
-        }
 
         if (this.wordCarriedOver) {
           this.wordCarriedOver = false;
@@ -1537,7 +1606,6 @@ export class GameScene extends Phaser.Scene {
     // Container to hold everything (for bounce-in animation)
     const statsContainer = this.add.container(GAME_WIDTH / 2, GAME_HEIGHT / 2)
       .setDepth(25)
-      .setScrollFactor(0)
       .setScale(0);
 
     // Panel shadow
@@ -1643,6 +1711,8 @@ export class GameScene extends Phaser.Scene {
       this.scene.start('MainMenuScene');
     });
 
+    this.toHud(statsContainer);
+
     // Bounce-in animation
     this.tweens.add({
       targets: statsContainer,
@@ -1685,7 +1755,9 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  update(): void {
+  update(_time: number, delta: number): void {
+    this.scenery.update(delta);
+
     // Angle sweep — keep oscillating during input phases so value stays current
     const sweepPhase =
       this.gameState.phase === GamePhase.ShowingWord ||

@@ -1,14 +1,8 @@
 import Phaser from 'phaser';
-import {
-  DPR,
-  FONT_FAMILY,
-  COLOR_STRINGS,
-  PHYSICS,
-  LETTER,
-  COLORS,
-} from '../config';
+import { DPR, FONT_FAMILY, PHYSICS, LETTER } from '../config';
 import { CollisionCategory } from '../types';
 import { runtimeConfig, getLaunchVelocity } from '../RuntimeConfig';
+import { TileStyle, tileTextureKey, TILE_TEXT_COLOR } from '../art/textures';
 
 // Phaser's matter.add.gameObject() mixes physics methods onto the game object.
 // TypeScript doesn't know about these, so we define the shape we use.
@@ -20,7 +14,7 @@ type MatterRect = Phaser.GameObjects.Rectangle & {
 
 interface LetterBody {
   rect: MatterRect;
-  visual: Phaser.GameObjects.Graphics;
+  visual: Phaser.GameObjects.Image;
   text: Phaser.GameObjects.Text;
   pin: MatterJS.ConstraintType;
   anchor: MatterJS.BodyType;
@@ -60,9 +54,11 @@ export class WordProjectile {
     const dropY = runtimeConfig.inputY;
     const targetY = this.originY;
 
-    // Create beveled visual and an invisible physics body
-    const visual = this.createBeveledVisual(LETTER.width, LETTER.height, COLORS.primary);
-    visual.setPosition(inputCharX, dropY).setDepth(4);
+    // Tile visual and an invisible physics body
+    const visual = this.scene.add
+      .image(inputCharX, dropY, tileTextureKey('normal'))
+      .setDisplaySize(LETTER.width, LETTER.height)
+      .setDepth(4);
 
     const rawRect = this.scene.add
       .rectangle(inputCharX, dropY, LETTER.width, LETTER.height, 0xffffff, 0)
@@ -90,7 +86,7 @@ export class WordProjectile {
       .text(inputCharX, dropY, char.toUpperCase(), {
         fontFamily: FONT_FAMILY,
         fontSize: `${LETTER.fontSize}px`,
-        color: COLOR_STRINGS.white,
+        color: TILE_TEXT_COLOR.normal,
         align: 'center',
         resolution: DPR,
       })
@@ -173,19 +169,20 @@ export class WordProjectile {
   /** Mark this projectile as "on fire" (accuracy bonus). */
   setOnFire(): void {
     this.isOnFire = true;
-    for (const letter of this.letters) {
-      this.redrawBevel(letter.visual, 0xff8c00); // dark orange
-      letter.text.setColor('#FFF8E1');
-    }
+    this.setTileStyle('fire');
   }
 
-  /** Mark this projectile as "super" (streak bonus). */
+  /** Mark this projectile as "super" (streak bonus). Super includes fire. */
   setSuper(): void {
     this.isSuper = true;
-    this.isOnFire = true; // super includes fire
+    this.isOnFire = true;
+    this.setTileStyle('super');
+  }
+
+  private setTileStyle(style: TileStyle): void {
     for (const letter of this.letters) {
-      this.redrawBevel(letter.visual, 0xffd700); // gold
-      letter.text.setColor('#FFFFFF');
+      letter.visual.setTexture(tileTextureKey(style)).setDisplaySize(LETTER.width, LETTER.height);
+      letter.text.setColor(TILE_TEXT_COLOR[style]);
     }
   }
 
@@ -297,9 +294,15 @@ export class WordProjectile {
   }
 
   update(): void {
-    // Sync overlaid text to physics body positions
+    // Sync overlaid text to physics body positions. The text is nudged up
+    // (in the tile's rotated frame) to sit on the tile face above its lip.
+    const lift = 2.5;
     for (const letter of this.letters) {
-      letter.text.setPosition(letter.rect.x, letter.rect.y);
+      const rot = letter.rect.rotation;
+      letter.text.setPosition(
+        letter.rect.x + Math.sin(rot) * lift,
+        letter.rect.y - Math.cos(rot) * lift
+      );
       letter.text.setRotation(letter.rect.rotation);
       letter.visual.setPosition(letter.rect.x, letter.rect.y);
       letter.visual.setRotation(letter.rect.rotation);
@@ -320,54 +323,5 @@ export class WordProjectile {
     }
     this.letters = [];
     this.linkConstraints = [];
-  }
-
-  private createBeveledVisual(
-    width: number,
-    height: number,
-    baseColor: number
-  ): Phaser.GameObjects.Graphics {
-    const gfx = this.scene.add.graphics();
-    this.drawBevel(gfx, width, height, baseColor);
-    return gfx;
-  }
-
-  private redrawBevel(gfx: Phaser.GameObjects.Graphics, baseColor: number): void {
-    gfx.clear();
-    this.drawBevel(gfx, LETTER.width, LETTER.height, baseColor);
-  }
-
-  private drawBevel(
-    gfx: Phaser.GameObjects.Graphics,
-    width: number,
-    height: number,
-    baseColor: number
-  ): void {
-    const lighter = this.tintColor(baseColor, 1.15);
-    const darker = this.tintColor(baseColor, 0.82);
-    const outline = this.tintColor(baseColor, 0.7);
-
-    const x = -width / 2;
-    const y = -height / 2;
-    const bevelH = Math.max(4, Math.round(height * 0.22));
-
-    gfx.fillStyle(baseColor, 1);
-    gfx.fillRect(x, y, width, height);
-
-    gfx.fillStyle(lighter, 0.9);
-    gfx.fillRect(x, y, width, bevelH);
-
-    gfx.fillStyle(darker, 0.9);
-    gfx.fillRect(x, y + height - bevelH, width, bevelH);
-
-    gfx.lineStyle(2, outline, 0.7);
-    gfx.strokeRect(x + 1, y + 1, width - 2, height - 2);
-  }
-
-  private tintColor(color: number, factor: number): number {
-    const r = Phaser.Math.Clamp(Math.round(((color >> 16) & 0xff) * factor), 0, 255);
-    const g = Phaser.Math.Clamp(Math.round(((color >> 8) & 0xff) * factor), 0, 255);
-    const b = Phaser.Math.Clamp(Math.round((color & 0xff) * factor), 0, 255);
-    return (r << 16) | (g << 8) | b;
   }
 }

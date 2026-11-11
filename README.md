@@ -1,5 +1,7 @@
 # Sola's Spell Smash
 
+**▶ Play it here: [laserpilot.github.io/Spell_Smash](https://laserpilot.github.io/Spell_Smash/)**
+
 A spelling practice game for first graders. See a word, hear it spoken aloud, then type it from memory to launch it as a physics projectile at a building made of blocks.
 
 ## How to Play
@@ -31,4 +33,4 @@ npm run build   # production build in dist/
 
 ## Deployment
 
-Pushes to `main` automatically deploy to GitHub Pages via the included workflow.
+Pushes to `main` automatically deploy to [GitHub Pages](https://laserpilot.github.io/Spell_Smash/) via the included workflow.
